@@ -504,6 +504,7 @@ class Model(Container):
         else:
             loss_function = objectives.get(loss)
             loss_functions = [loss_function for _ in range(len(self.outputs))]
+        print('Number of outputs:',len(self.outputs))
         self.loss_functions = loss_functions
         weighted_losses = [weighted_objective(fn) for fn in loss_functions]
 

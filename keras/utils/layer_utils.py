@@ -36,8 +36,8 @@ def layer_from_config(config, custom_objects={}):
 
 
 def print_summary(layers, relevant_nodes=None):
-    line_length = 100  # total length of printed lines
-    positions = [35, 55, 67, 100]  # absolute positions of log elements in each line
+    line_length = 120  # total length of printed lines
+    positions = [35, 70, 90, 120]  # absolute positions of log elements in each line
     # header names for the different log elements
     to_display = ['Layer (type)', 'Output Shape', 'Param #', 'Connected to']
 

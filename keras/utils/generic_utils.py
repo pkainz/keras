@@ -97,11 +97,12 @@ class Progbar(object):
             for k in self.unique_values:
                 info += ' - %s:' % k
                 if type(self.sum_values[k]) is list:
+                    #print(self.sum_values[k])
                     avg = self.sum_values[k][0] / max(1, self.sum_values[k][1])
                     if abs(avg) > 1e-3:
-                        info += ' %.4f' % avg
+                        info += ' %.10f' % avg
                     else:
-                        info += ' %.4e' % avg
+                        info += ' %.10e' % avg
                 else:
                     info += ' %s' % self.sum_values[k]
 
@@ -122,9 +123,9 @@ class Progbar(object):
                     info += ' - %s:' % k
                     avg = self.sum_values[k][0] / max(1, self.sum_values[k][1])
                     if avg > 1e-3:
-                        info += ' %.4f' % avg
+                        info += ' %.10f' % avg
                     else:
-                        info += ' %.4e' % avg
+                        info += ' %.10e' % avg
                 sys.stdout.write(info + "\n")
 
     def add(self, n, values=[]):

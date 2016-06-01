@@ -11,6 +11,11 @@ import inspect
 import numpy as np
 from .common import _FLOATX, _EPSILON
 
+def _on_gpu():
+    '''Returns whether the session is set to
+    run on GPU or not (i.e. on CPU).
+    '''
+    return theano.config.device[:3] == 'gpu'
 
 # INTERNAL UTILS
 theano.config.floatX = _FLOATX
@@ -194,7 +199,6 @@ def mean(x, axis=None, keepdims=False):
     if 'int' in x.dtype:
         dtype = _FLOATX
     return T.mean(x, axis=axis, keepdims=keepdims, dtype=dtype)
-
 
 def std(x, axis=None, keepdims=False):
     return T.std(x, axis=axis, keepdims=keepdims)

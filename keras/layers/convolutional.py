@@ -1046,7 +1046,38 @@ class UpSampling2D(Layer):
         config = {'size': self.size}
         base_config = super(UpSampling2D, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
-
+    
+# class UpSampling2DLinear(UpSampling2D):
+#     '''Bilinear upsampling the rows and columns of the data
+#     by size[0] and size[1] respectively.
+# 
+#     # Arguments
+#         size: tuple of 2 integers. The upsampling factors for rows and columns.
+#         dim_ordering: 'th' or 'tf'.
+#             In 'th' mode, the channels dimension (the depth)
+#             is at index 1, in 'tf' mode is it at index 3.
+# 
+#     # Input shape
+#         4D tensor with shape:
+#         `(samples, channels, rows, cols)` if dim_ordering='th'
+#         or 4D tensor with shape:
+#         `(samples, rows, cols, channels)` if dim_ordering='tf'.
+# 
+#     # Output shape
+#         4D tensor with shape:
+#         `(samples, channels, upsampled_rows, upsampled_cols)` if dim_ordering='th'
+#         or 4D tensor with shape:
+#         `(samples, upsampled_rows, upsampled_cols, channels)` if dim_ordering='tf'.
+#     '''
+# 
+#     def __init__(self, size=(2, 2), dim_ordering='th', **kwargs):
+#         super(UpSampling2DLinear, self).__init__(size,dim_ordering,**kwargs)
+# 
+#     def call(self, x, mask=None):
+#         resized_near_neigh = super.call(x, self.size[0], self.size[1],
+#                                self.dim_ordering)
+#         # apply bilinear filter kernel to the resized image
+#         raise Exception('Not yet implemented!')
 
 class UpSampling3D(Layer):
     '''Repeat the first, second and third dimension of the data
