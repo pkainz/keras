@@ -35,7 +35,7 @@ def layer_from_config(config, custom_objects={}):
     return layer_class.from_config(config['config'])
 
 
-def print_summary(layers, relevant_nodes=None, line_length=150, positions=[.33, .55, .67, 1.]):
+def print_summary(layers, relevant_nodes=None, line_length=200, positions=[.33, .55, .75, 1.]):
     # line_length: total length of printed lines
     # positions: relative or absolute positions of log elements in each line
     if positions[-1] <= 1:
@@ -58,7 +58,8 @@ def print_summary(layers, relevant_nodes=None, line_length=150, positions=[.33, 
     def print_layer_summary(layer):
         try:
             output_shape = layer.output_shape
-        except:
+        except Exception as e:
+            print(e)
             output_shape = 'multiple'
         connections = []
         for node_index, node in enumerate(layer.inbound_nodes):
@@ -97,3 +98,38 @@ def print_summary(layers, relevant_nodes=None, line_length=150, positions=[.33, 
 
     print('Total params: %s' % total_params)
     print('_' * line_length)
+    
+    
+
+def print_structure(weight_file_path):
+    """
+    Obtained from https://github.com/fchollet/keras/issues/91
+    Prints out the structure of HDF5 file.
+
+    Args:
+      weight_file_path (str) : Path to the file to analyze
+    """
+    import h5py
+    f = h5py.File(weight_file_path)
+    try:
+        if len(f.attrs.items()):
+            print("{} contains: ".format(weight_file_path))
+            print("Root attributes:")
+        for key, value in f.attrs.items():
+            print("  {}: {}".format(key, value))
+
+        if len(f.items())==0:
+            return 
+
+        for layer, g in f.items():
+            print("  {}".format(layer))
+            print("    Attributes:")
+            for key, value in g.attrs.items():
+                print("      {}: {}".format(key, value))
+
+            print("    Dataset:")
+            for p_name in g.keys():
+                param = g[p_name]
+                print("      {}: {}".format(p_name, param.shape))
+    finally:
+        f.close()

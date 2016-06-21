@@ -5,10 +5,24 @@ from six.moves import range
 from six.moves import zip
 
 
+def to_categorical_3D(y, nb_classes=None):
+
+    if not nb_classes:
+        nb_classes = np.max(y)+1
+        
+    Y = np.zeros((y.shape[0], nb_classes, y.shape[2]*y.shape[3]*y.shape[4]))
+    for i in range(len(y)): # for each example
+        for j in range(nb_classes): # for each class
+            Y[i,j,np.ravel(y[i,0,]==j)] = 1.
+    return Y.reshape((y.shape[0], nb_classes, y.shape[2], y.shape[3], y.shape[4]))
+#             for z_ in range(y.shape[2]): # for each z
+#                 for y_ in range(y.shape[3]): # for each y
+#                     for x_ in range(y.shape[4]): # for each x
 def to_categorical(y, nb_classes=None):
     '''Convert class vector (integers from 0 to nb_classes)
     to binary class matrix, for use with categorical_crossentropy.
     '''
+
     if not nb_classes:
         nb_classes = np.max(y)+1
     Y = np.zeros((len(y), nb_classes))

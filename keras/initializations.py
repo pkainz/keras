@@ -33,7 +33,7 @@ def uniform(shape, scale=0.05, name=None):
                       name=name)
 
 
-def normal(shape, scale=0.01, name=None):
+def normal(shape, scale=0.05, name=None):
     return K.variable(np.random.normal(loc=0.0, scale=scale, size=shape),
                       name=name)
 
