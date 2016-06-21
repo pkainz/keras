@@ -461,6 +461,8 @@ class Sequential(Model):
     def predict_on_batch(self, x):
         '''Returns predictions for a single batch of samples.
         '''
+        if self.model is None:
+            self.build()
         return self.model.predict_on_batch(x)
 
     def train_on_batch(self, x, y, class_weight=None,
@@ -481,6 +483,8 @@ class Sequential(Model):
             The attribute `model.metrics_names` will give you
             the display labels for the scalar outputs.
         '''
+        if self.model is None:
+            raise Exception('The model needs to be compiled before being used.')
         if 'accuracy' in kwargs:
             kwargs.pop('accuracy')
             warnings.warn('The "accuracy" argument is deprecated, '
@@ -511,6 +515,8 @@ class Sequential(Model):
             The attribute `model.metrics_names` will give you
             the display labels for the scalar outputs.
         '''
+        if self.model is None:
+            raise Exception('The model needs to be compiled before being used.')
         if 'accuracy' in kwargs:
             kwargs.pop('accuracy')
             warnings.warn('The "accuracy" argument is deprecated, '
@@ -609,7 +615,7 @@ class Sequential(Model):
                 while 1:
                     f = open(path)
                     for line in f:
-                        # create numpy arrays of input data
+                        # create Numpy arrays of input data
                         # and labels, from each line in the file
                         x, y = process_line(line)
                         yield (x, y)
@@ -696,7 +702,7 @@ class Sequential(Model):
             A Numpy array of predictions.
         '''
         if self.model is None:
-            raise Exception('The model needs to be compiled before being used.')
+            self.build()
         return self.model.predict_generator(generator, val_samples,
                                             max_q_size=max_q_size)
 
@@ -724,12 +730,15 @@ class Sequential(Model):
         return copy.deepcopy(config)
 
     @classmethod
-    def from_config(cls, config, layer_cache={}):
+    def from_config(cls, config, layer_cache=None):
         '''Supports legacy formats
         '''
         from keras.utils.layer_utils import layer_from_config
         from keras.layers import Merge
         assert type(config) is list
+
+        if not layer_cache:
+            layer_cache = {}
 
         def normalize_legacy_config(conf):
             if 'class_name' not in conf:
