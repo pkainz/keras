@@ -43,8 +43,8 @@ class DePool2D(UpSampling2D):
     '''
     input_ndim = 4
 
-    def __init__(self, pool2d_layer, *args, **kwargs):
-        self._pool2d_layer = pool2d_layer
+    def __init__(self, master_layer, *args, **kwargs):
+        self._master_layer = master_layer
         super(DePool2D, self).__init__(*args, **kwargs)
 
     def get_output(self, train=False):
@@ -57,10 +57,10 @@ class DePool2D(UpSampling2D):
             output = K.repeat_elements(output, self.size[1], axis=2)
         else:
             raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
-
-        f = T.grad(T.sum(self._pool2d_layer.get_output(train)), 
-                   wrt=self._pool2d_layer.get_input(train)) * output
-
+  
+        f = K.gradients(K.sum(self._master_layer.get_output(train)), 
+                        self._master_layer.get_input(train)) * output
+  
         return f
 
 
@@ -132,7 +132,7 @@ def deconv2d_fast(x, kernel, strides=(1, 1), border_mode='valid', dim_ordering='
     return conv_out
 
 
-class DeConvolution2D(Convolution2D):
+class Deconvolution2D(Convolution2D):
     '''Convolution operator for filtering windows of two-dimensional inputs.
     When using this layer as the first layer in a model,
     provide the keyword argument `input_shape`
@@ -153,6 +153,9 @@ class DeConvolution2D(Convolution2D):
 
 
     # Arguments
+        master_layer: The layer to tie the weights to.
+        nb_output_channels: Number of output channels (=input to the dependent layer).
+        layer_history_index: For use with functional API.
         nb_filter: Number of convolution filters to use.
         nb_row: Number of rows in the convolution kernel.
         nb_col: Number of columns in the convolution kernel.
@@ -185,43 +188,40 @@ class DeConvolution2D(Convolution2D):
     '''
     input_ndim = 4
 
-    def __init__(self, binded_conv_layer, nb_out_channels=None, *args, **kwargs):
+    def __init__(self, master_layer, nb_out_channels=None, 
+                 layer_history_index=0, *args, **kwargs):
+        """
+        @param layer_history_index 
+            For use with functional API (keras >=1.0), the index specifies input to the
+            dependent layer should be the output of this one
+        """
         try:
-            self._binded_conv_layer = binded_conv_layer._keras_history[0]
+            # compatibility for the functional API
+            self._master_layer = master_layer._keras_history[layer_history_index]
         except AttributeError as e:
-            self._binded_conv_layer = binded_conv_layer
+            # for use with Sequential().add(...)
+            self._master_layer = master_layer
         
-        print('_binded_conv_layer:',self._binded_conv_layer.input_shape,self._binded_conv_layer.get_config())
-        # autocompute the channels
+        kwargs['nb_filter'] = self._master_layer.nb_filter
+        kwargs['nb_row'] = self._master_layer.nb_row
+        kwargs['nb_col'] = self._master_layer.nb_col
+        super(Deconvolution2D, self).__init__(*args, **kwargs)
+        
+        # autocompute the output channels
         if nb_out_channels == None:
-            # out_channels here is input_channels in binded_conv layer
-            # normal conv layer:
-            # 0 = nb_inputs
-            # 1 = nb_filters (= nb_outputs)
-            # 2 = filter_cols
-            # 3 = filter_rows
-            self.nb_out_channels = self._binded_conv_layer.input_shape[0]
+            if self.dim_ordering == 'th':
+                self.nb_out_channels = self._master_layer.input_shape[1]
+            elif self.dim_ordering == 'tf':
+                raise NotImplementedError()
+            else:
+                raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
         else:
             self.nb_out_channels = nb_out_channels
-        kwargs['nb_filter'] = self._binded_conv_layer.nb_filter
-        kwargs['nb_row'] = self._binded_conv_layer.nb_row
-        kwargs['nb_col'] = self._binded_conv_layer.nb_col
-        super(DeConvolution2D, self).__init__(*args, **kwargs)
 
     def build(self, input_shape):
-        # transpose the weights
         if self.dim_ordering == 'th':
-            # normal conv layer:
-            # 0 = nb_inputs
-            # 1 = nb_filters (= nb_outputs)
-            # 2 = filter_cols
-            # 3 = filter_rows
-            print('    W_shape_original:',self._binded_conv_layer.W_shape)
-            self.W = self._binded_conv_layer.W.dimshuffle((1, 0, 2, 3))
-            #self.nb_out_channels = self._binded_conv_layer.input_shape[1]
+            self.W = self._master_layer.W.dimshuffle((1, 0, 2, 3))
             self.W_shape = (self.nb_out_channels, self.nb_filter, self.nb_row, self.nb_col)
-            print('    W_shape_new:',self.W_shape)
-            print('\n')
         elif self.dim_ordering == 'tf':
             raise NotImplementedError()
         else:
@@ -247,11 +247,9 @@ class DeConvolution2D(Convolution2D):
             self.set_weights(self.initial_weights)
             del self.initial_weights
 
-    @property
-    def output_shape(self):
-        #output_shape = list(self._binded_conv_layer.output_shape)
-        #print(list(self._binded_conv_layer.output_shape))
-        output_shape = list(self._binded_conv_layer.output_shape)
+
+    def get_output_shape_for(self, input_shape):
+        output_shape = list(super(Deconvolution2D, self).get_output_shape_for(input_shape))
 
         if self.dim_ordering == 'th':
             output_shape[1] = self.nb_out_channels
@@ -261,27 +259,27 @@ class DeConvolution2D(Convolution2D):
             raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
         return tuple(output_shape)
 
-    def get_output(self, train=False):
-        X = self.get_input(train)
-        conv_out = deconv2d_fast(X, self.W,
+
+    def call(self, x, mask=None):
+        conv_out = deconv2d_fast(x, self.W,
                                  strides=self.subsample,
                                  border_mode=self.border_mode,
                                  dim_ordering=self.dim_ordering,
-                                 image_shape=self.input_shape,
                                  filter_shape=self.W_shape)
+    
         if self.dim_ordering == 'th':
             output = conv_out + K.reshape(self.b, (1, self.nb_out_channels, 1, 1))
         elif self.dim_ordering == 'tf':
             output = conv_out + K.reshape(self.b, (1, 1, 1, self.nb_out_channels))
         else:
             raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
- 
+    
         output = self.activation(output)
         return output
+    
 
     def get_config(self):
-        config = {'name': self.__class__.__name__,
-                  'nb_filter': self.nb_filter,
+        config = {'nb_filter': self.nb_filter,
                   'nb_row': self.nb_row,
                   'nb_col': self.nb_col,
                   'init': self.init.__name__,
@@ -294,23 +292,31 @@ class DeConvolution2D(Convolution2D):
                   'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
                   'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
                   'b_constraint': self.b_constraint.get_config() if self.b_constraint else None}
-        base_config = super(Convolution2D, self).get_config()
+        base_config = super(Deconvolution2D, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
 
 class DependentDense(Dense):
-    def __init__(self, output_dim, master_layer, init='glorot_uniform', activation='linear', weights=None,
+    def __init__(self, output_dim, master_layer, layer_history_index=0,
+                 init='glorot_uniform', activation='linear', weights=None,
                  W_regularizer=None, b_regularizer=None, activity_regularizer=None,
                  W_constraint=None, b_constraint=None, input_dim=None, **kwargs):
+        """
+        @param layer_history_index 
+            For use with functional API (keras >=1.0), the index specifies input to the
+            dependent layer should be the output of this one
+        """
         try:
-            self.master_layer = master_layer._keras_history[0]
+            # compatibility for the functional API
+            self._master_layer = master_layer._keras_history[layer_history_index]
         except AttributeError as ae:
-            self.master_layer = master_layer
+            # for use with Sequential().add(...)
+            self._master_layer = master_layer
         
         super(DependentDense, self).__init__(output_dim, **kwargs)
 
     def build(self, input_dim):
-        self.W = self.master_layer.W.T
+        self.W = self._master_layer.W.T
         self.b = K.zeros((self.output_dim,))
         self.params = [self.b]
         self.regularizers = []
