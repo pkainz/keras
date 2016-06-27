@@ -2425,7 +2425,7 @@ class Container(Layer):
         import yaml
         return yaml.dump(self._updated_config(), **kwargs)
 
-    def summary(self, line_length=100, positions=[.33, .55, .67, 1.]):
+    def summary(self, line_length=150, positions=[.33, .55, .75, 1.]):
         from keras.utils.layer_utils import print_summary
 
         if hasattr(self, 'flattened_layers'):

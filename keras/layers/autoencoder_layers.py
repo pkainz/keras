@@ -12,14 +12,11 @@ class SumLayer(Layer):
     def __init__(self, **kwargs):
         super(SumLayer, self).__init__(**kwargs)
 
-    @property
-    def output_shape(self):
-        input_shape = self.input_shape
+    def get_output_shape_for(self, input_shape):
         return (input_shape[0], 1, input_shape[2], input_shape[3])
 
-    def get_output(self, train=False):
-        X = self.get_input(train)
-        return X.sum(axis=1, keepdims=True)
+    def call(self, x, mask=None):
+        return K.sum(x, axis=1, keepdims=True)
 
 
 class DePool2D(UpSampling2D):
@@ -49,16 +46,25 @@ class DePool2D(UpSampling2D):
         self._master_layer = master_layer
         super(DePool2D, self).__init__(*args, **kwargs)
 
-    # using old API
-    def get_output(self, train=False):
-        X = self.get_input(train)
-        output = K.resize_images(X, self.size[0], self.size[1], 
+    def call(self, x, mask=None):
+        output = K.resize_images(x, self.size[0], self.size[1], 
                                  self.dim_ordering)
   
-        f = K.gradients(K.sum(self._master_layer.get_output(train)), 
-                        self._master_layer.get_input(train)) * output
+        f = K.gradients(K.sum(self._master_layer.output), 
+                        self._master_layer.input) * output
   
         return f
+
+#     # old API (keras 0.3)
+#     def get_output(self, train=False):
+#         X = self.get_input(train)
+#         output = K.resize_images(X, self.size[0], self.size[1], 
+#                                  self.dim_ordering)
+#   
+#         f = K.gradients(K.sum(self._master_layer.get_output(train)), 
+#                         self._master_layer.get_input(train)) * output
+#   
+#         return f
 
 
 class DePool3D(UpSampling3D):
@@ -94,16 +100,26 @@ class DePool3D(UpSampling3D):
         self._master_layer = master_layer
         super(DePool3D, self).__init__(*args, **kwargs)
 
-    # using old API
-    def get_output(self, train=False):
-        X = self.get_input(train)
-        output = K.resize_volumes(X, self.size[0], self.size[1], self.size[2],
+    def call(self, x, mask=None):
+        output = K.resize_volumes(x, self.size[0], self.size[1], self.size[2],
                                 self.dim_ordering)
   
-        f = K.gradients(K.sum(self._master_layer.get_output(train)), 
-                        self._master_layer.get_input(train)) * output
+        f = K.gradients(K.sum(self._master_layer.output), 
+                        self._master_layer.input) * output
         
         return f
+        
+#     # old API (keras 0.3)
+#     def get_output(self, train=False):
+#         X = self.get_input(train)
+#         output = K.resize_volumes(X, self.size[0], self.size[1], self.size[2],
+#                                 self.dim_ordering)
+#   
+#         f = K.gradients(K.sum(self._master_layer.get_output(train)), 
+#                         self._master_layer.get_input(train)) * output
+#         
+#         return f
+    
 
 
 def deconv2d_fast(x, kernel, strides=(1, 1), 
@@ -661,4 +677,10 @@ class DependentDense(Dense):
         if self.initial_weights is not None:
             self.set_weights(self.initial_weights)
             del self.initial_weights
+
+#     @classmethod
+#     def from_config(cls, config):
+#         config2 = super(DependentDense).from_config(cls, config)
+#         return config2
+
 
