@@ -224,12 +224,21 @@ def deconv3d(x, kernel, strides=(1, 1, 1),
 
     border_mode_3d = (border_mode, border_mode, border_mode)
     
-    # flip the filters here, since the original convolution does not
+    #### TRANSPOSED KERNELS ####
+    # flip the filters again, since the original Convolution3D implemented in 
+    # the keras backend (theano.tensor.nnet.conv3d2d.conv3d) does it as well
+    # this way we emulate the transposed convolution
+    ###
+    # TH input shape: (samples, input_depth, conv_dim1, conv_dim2, conv_dim3)
+    # TH kernel shape: (out_depth, input_depth, kernel_dim1, kernel_dim2, kernel_dim3)
+    # idx 2, 3, 4 are kernel size dimensions
     filters_flip = kernel[:,:,::-1,::-1,::-1]
+    ####
     # perform the convolution
     conv_out = conv3d2d.conv3d(signals=x.dimshuffle(0, 2, 1, 3, 4),
                                filters=filters_flip.dimshuffle(0, 2, 1, 3, 4),
                                border_mode=border_mode_3d)
+    # re-arrange the dimensions of the output
     conv_out = conv_out.dimshuffle(0, 2, 1, 3, 4)
 
     # support strides by manually slicing the output
