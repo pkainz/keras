@@ -355,6 +355,7 @@ class Deconvolution2D(Convolution2D):
 
     def build(self, input_shape):
         assert len(input_shape) == 4
+        self.input_spec = [InputSpec(shape=input_shape)]
         
         if self.dim_ordering == 'th':
             self.W = self._master_layer.W.dimshuffle((1, 0, 2, 3))
@@ -657,16 +658,32 @@ class DependentDense(Dense):
         
         super(DependentDense, self).__init__(output_dim, **kwargs)
 
-    def build(self, input_dim):
+    def build(self, input_shape):
+        assert len(input_shape) == 2
+        input_dim = input_shape[1]
+        self.input_spec = [InputSpec(dtype=K.floatx(),
+                                     shape=(None, input_dim))]
+        
+        
         self.W = self._master_layer.W.T
-        self.b = K.zeros((self.output_dim,))
-        self.params = [self.b]
+        if self.bias:
+            self.b = K.zeros((self.output_dim,))
+            self.trainable_weights = [self.b]
+        else:
+            self.trainable_weights = []
+
+        # if we directly set params here, bias does not show 
+        # up as trainable weight
+#         self.W = self._master_layer.W.T
+#         self.b = K.zeros((self.output_dim,))
+#         self.params = [self.b]
+
         self.regularizers = []
         if self.W_regularizer:
             self.W_regularizer.set_param(self.W)
             self.regularizers.append(self.W_regularizer)
 
-        if self.b_regularizer:
+        if self.bias and self.b_regularizer:
             self.b_regularizer.set_param(self.b)
             self.regularizers.append(self.b_regularizer)
 
@@ -674,13 +691,28 @@ class DependentDense(Dense):
             self.activity_regularizer.set_layer(self)
             self.regularizers.append(self.activity_regularizer)
 
+        self.constraints = {}
+        if self.W_constraint:
+            self.constraints[self.W] = self.W_constraint
+        if self.bias and self.b_constraint:
+            self.constraints[self.b] = self.b_constraint
+
         if self.initial_weights is not None:
             self.set_weights(self.initial_weights)
             del self.initial_weights
-
-#     @classmethod
-#     def from_config(cls, config):
-#         config2 = super(DependentDense).from_config(cls, config)
-#         return config2
+        
+#     def get_config(self):
+#         config = {'output_dim': self.output_dim,
+#                   'init': self.init.__name__,
+#                   'activation': self.activation.__name__,
+#                   'W_regularizer': self.W_regularizer.get_config() if self.W_regularizer else None,
+#                   'b_regularizer': self.b_regularizer.get_config() if self.b_regularizer else None,
+#                   'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
+#                   'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
+#                   'b_constraint': self.b_constraint.get_config() if self.b_constraint else None,
+#                   'bias': self.bias,
+#                   'input_dim': self.input_dim}
+#         base_config = super(DependentDense, self).get_config()
+#         return dict(list(base_config.items()) + list(config.items())) 
 
 
