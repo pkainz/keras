@@ -56,7 +56,8 @@ class TestVolume:
             tmp_folder = tempfile.mkdtemp(prefix='test_images')
             for x, y in generator.flow(images, np.arange(images.shape[0]),
                                        shuffle=True, save_to_dir=tmp_folder):
-                assert x.shape[1:] == images.shape[1:]
+                # x is a list
+                assert x[0].shape[1:] == images.shape[1:]
                 break
             shutil.rmtree(tmp_folder)
 

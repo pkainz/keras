@@ -182,10 +182,10 @@ def img_to_array(img, dim_ordering=K.image_dim_ordering()):
     if dim_ordering not in ['th', 'tf']:
         raise Exception('Unknown dim_ordering: ', dim_ordering)
     # image has dim_ordering (depth, height, width, channels)
-    print(img.GetSize())
+    #print(img.GetSize())
     x = itk_to_np(img)
     x = np.asarray(x, dtype='float32')
-    print(x.shape)
+    #print(x.shape)
     if len(x.shape) == 4: 
         if dim_ordering == 'th':
             x = x.transpose(3, 0, 1, 2)
@@ -273,6 +273,7 @@ class VolumeDataGenerator(object):
             It defaults to the `image_dim_ordering` value found in your
             Keras config file at `~/.keras/keras.json`.
             If you never set it, then it will be "th".
+        (unused) nb_inputs: Number of inputs to the model. Default is 1.
     '''
     def __init__(self,
                  featurewise_center=False,
@@ -294,11 +295,12 @@ class VolumeDataGenerator(object):
                  horizontal_flip=False,
                  vertical_flip=False,
                  rescale=None,
-                 dim_ordering=K.image_dim_ordering()):
+                 dim_ordering=K.image_dim_ordering(),
+                 nb_inputs=1):
         self.__dict__.update(locals())
-        self.mean = None
-        self.std = None
-        self.principal_components = None
+#         self.mean = [None]*nb_inputs
+#         self.std = [None]*nb_inputs
+#         self.principal_components = [None]*nb_inputs
         self.rescale = rescale
 
         if dim_ordering not in {'tf', 'th'}:
@@ -320,7 +322,6 @@ class VolumeDataGenerator(object):
             self.row_index = 2
             self.col_index = 3
 
-
         if np.isscalar(zoom_range):
             self.zoom_range = [1 - zoom_range, 1 + zoom_range]
         elif len(zoom_range) == 2:
@@ -333,7 +334,12 @@ class VolumeDataGenerator(object):
     def flow(self, X, y=None, batch_size=32, shuffle=True, seed=None,
              save_to_dir=None, save_prefix='', save_format='mha'):
         '''
-        Flow from numpy array iterator.
+        Flow from numpy array iterator, for each item in a list.
+        
+        # Arguments
+            X: the input
+                Numpy array
+                list of Numpy arrays, one for each input to the model
         '''
         return NumpyArrayIterator(
             X, y, self,
@@ -356,8 +362,26 @@ class VolumeDataGenerator(object):
 #             batch_size=batch_size, shuffle=shuffle, seed=seed,
 #             save_to_dir=save_to_dir, save_prefix=save_prefix, save_format=save_format)
 
+    def standardize_batch(self, X):
+        '''
+        Standardizes a given input batch using the values 
+        computed on the training data.
+        
+        # Arguments:
+            X: input batch
+                Numpy array
+                list of Numpy arrays
+        '''
+        if not isinstance(X, list):
+            X = [X]
+        
+        for ipt_idx in xrange(len(X)):
+            for j in xrange(len(X[ipt_idx])):
+                X[ipt_idx][j] = self.standardize(X[ipt_idx][j], ipt_idx)
+        
+        return X
 
-    def standardize(self, x):
+    def standardize(self, x, ipt_idx=0):
         '''
         Standardize the feature range of a single 3D image x
         '''
@@ -371,13 +395,13 @@ class VolumeDataGenerator(object):
             x /= (np.std(x, axis=img_channel_index, keepdims=True) + 1e-7)
 
         if self.featurewise_center:
-            x -= self.mean
+            x -= self.mean[ipt_idx]
         if self.featurewise_std_normalization:
-            x /= (self.std + 1e-7)
+            x /= (self.std[ipt_idx] + 1e-7)
 
         if self.zca_whitening:
             flatx = np.reshape(x, (x.size))
-            whitex = np.dot(flatx, self.principal_components)
+            whitex = np.dot(flatx, self.principal_components[ipt_idx])
             x = np.reshape(whitex, (x.shape[0], x.shape[1], x.shape[2], x.shape[3]))
 
         return x
@@ -391,7 +415,7 @@ class VolumeDataGenerator(object):
         img_col_index = self.col_index - 1
         img_channel_index = self.channel_index - 1
         
-        print(img_depth_index,img_row_index,img_col_index,img_channel_index)
+        #print(img_depth_index,img_row_index,img_col_index,img_channel_index)
 
         # use composition of homographies to generate final transform that needs to be applied
         ####################################### rotation in XY, YZ, XZ separately
@@ -501,34 +525,45 @@ class VolumeDataGenerator(object):
         and zca_whitening.
 
         # Arguments
-            X: Numpy array, the data to fit on.
+            X: The data to fit on
+                Numpy array
+                list of Numpy arrays, an array for each input of the model
             augment: whether to fit on randomly augmented samples
             rounds: if `augment`,
                 how many augmentation passes to do over the data
             seed: random seed.
         '''
-        X = np.copy(X)
-        if augment:
-            aX = np.zeros(tuple([rounds * X.shape[0]] + list(X.shape)[1:]))
-            for r in range(rounds):
-                for i in range(X.shape[0]):
-                    aX[i + r * X.shape[0]] = self.random_transform(X[i])
-            X = aX
-
-        if self.featurewise_center:
-            self.mean = np.mean(X, axis=0)
-            X -= self.mean
-
-        if self.featurewise_std_normalization:
-            self.std = np.std(X, axis=0)
-            X /= (self.std + 1e-7)
-
-        if self.zca_whitening:
-            flatX = np.reshape(X, (X.shape[0], X.shape[1] * X.shape[2] * X.shape[3] * X.shape[4]))
-            sigma = np.dot(flatX.T, flatX) / flatX.shape[1]
-            U, S, V = linalg.svd(sigma)
-            self.principal_components = np.dot(np.dot(U, np.diag(1. / np.sqrt(S + 10e-7))), U.T)
-
+        # if the passed data is not already a list, prepare the generator
+        if not isinstance(X, list):
+            X = [X]
+        self.mean = [None]*len(X)
+        self.std = [None]*len(X)
+        self.principal_components = [None]*len(X)
+        
+        for ipt_idx in xrange(len(X)):
+            X_ = np.copy(X[ipt_idx])
+            if augment:
+                aX = np.zeros(tuple([rounds * X_.shape[0]] + list(X_.shape)[1:]))
+                for r in range(rounds):
+                    for i in range(X_.shape[0]):
+                        aX[i + r * X_.shape[0]] = self.random_transform(X_[i])
+                X_ = aX
+    
+            if self.featurewise_center:
+                self.mean[ipt_idx] = np.mean(X_, axis=0)
+                X_ -= self.mean[ipt_idx]
+    
+            if self.featurewise_std_normalization:
+                self.std[ipt_idx] = np.std(X_, axis=0)
+                X_ /= (self.std[ipt_idx] + 1e-7)
+    
+            if self.zca_whitening:
+                flatX = np.reshape(X_, (X_.shape[0], X_.shape[1] * X_.shape[2] * X_.shape[3] * X_.shape[4]))
+                sigma = np.dot(flatX.T, flatX) / flatX.shape[1]
+                U, S, V = linalg.svd(sigma)
+                self.principal_components[ipt_idx] = np.dot(np.dot(U, np.diag(1. / np.sqrt(S + 10e-7))), U.T)
+        
+        return self.mean, self.std, self.principal_components
 
 class Iterator(object):
 
@@ -582,10 +617,28 @@ class NumpyArrayIterator(Iterator):
                  batch_size=32, shuffle=False, seed=None,
                  dim_ordering=K.image_dim_ordering(),
                  save_to_dir=None, save_prefix='', save_format='mha'):
-        if y is not None and len(X) != len(y):
+        '''
+        # Arguments
+            X: input images
+                Numpy array
+                list of Numpy arrays, one entry for each input to the model
+            y: labels
+        '''
+        # wrap the input in a list
+        if not isinstance(X, list):
+            X = [X]
+        
+        # check if number of samples are the same in all X's and y
+        X_lens = list(set([ X_.shape[0] for X_ in X ]))
+        if not len(X_lens) == 1:
+            raise Exception('All inputs in X should have the same length.')
+        n_samples = X_lens[0]
+
+        if y is not None and n_samples != len(y):
             raise Exception('X (images tensor) and y (labels) '
                             'should have the same length. '
-                            'Found: X.shape = %s, y.shape = %s' % (np.asarray(X).shape, np.asarray(y).shape))
+                            'Found: X.shape = %s, y.shape = %s' % (np.asarray(X[0]).shape, np.asarray(y).shape))
+        
         self.X = X
         self.y = y
         self.image_data_generator = image_data_generator
@@ -593,7 +646,7 @@ class NumpyArrayIterator(Iterator):
         self.save_to_dir = save_to_dir
         self.save_prefix = save_prefix
         self.save_format = save_format
-        super(NumpyArrayIterator, self).__init__(X.shape[0], batch_size, shuffle, seed)
+        super(NumpyArrayIterator, self).__init__(X[0].shape[0], batch_size, shuffle, seed)
 
     def next(self):
         # for python 2.x.
@@ -603,25 +656,35 @@ class NumpyArrayIterator(Iterator):
         with self.lock:
             index_array, current_index, current_batch_size = next(self.index_generator)
         # The transformation of images is not under thread lock so it can be done in parallel
-        batch_x = np.zeros(tuple([current_batch_size] + list(self.X.shape)[1:]))
-        for i, j in enumerate(index_array):
-            x = self.X[j]
-            x = self.image_data_generator.random_transform(x.astype('float32'))
-            x = self.image_data_generator.standardize(x)
-            batch_x[i] = x
-        if self.save_to_dir:
-            for i in range(current_batch_size):
-                # convert image to sitk
-                img = array_to_img(batch_x[i], self.dim_ordering, scale=False)
-                fname = '{prefix}_{index}_{hash}.{format}'.format(prefix=self.save_prefix,
-                                                                  index=current_index + i,
-                                                                  hash=np.random.randint(1e4),
-                                                                  format=self.save_format)
-                sitk.WriteImage(img,os.path.join(self.save_to_dir, fname))
-        if self.y is None:
-            return batch_x
-        batch_y = self.y[index_array]
-        return batch_x, batch_y
+        batch_x_list = [None]*len(self.X)
+        for ipt_idx in xrange(len(self.X)):
+            #print('Processing input idx %s'%ipt_idx)
+            batch_x = np.zeros(tuple([current_batch_size] + list(self.X[ipt_idx].shape)[1:]))
+            for i, j in enumerate(index_array):
+                x = self.X[ipt_idx][j]
+                x = self.image_data_generator.random_transform(x.astype('float32'))
+                x = self.image_data_generator.standardize(x,ipt_idx)
+                batch_x[i] = x
+            if self.save_to_dir:
+                for i in range(current_batch_size):
+                    # convert image to sitk
+                    img = array_to_img(batch_x[i], self.dim_ordering, scale=False)
+                    fname = '{prefix}_{input}_{index}_{hash}.{format}'.format(
+                                                                      input=str(ipt_idx),
+                                                                      prefix=self.save_prefix,
+                                                                      index=current_index + i,
+                                                                      hash=np.random.randint(1e4),
+                                                                      format=self.save_format)
+                    sitk.WriteImage(img,os.path.join(self.save_to_dir, fname))
+            batch_x_list[ipt_idx] = batch_x
+            
+        if not self.y is None:
+            batch_y = self.y[index_array]
+            # TODO this must return a list of inputs (for each)
+            # e.g. return [batch_x1,batch_x2],batch_y
+            return batch_x_list,batch_y
+        else:
+            return batch_x_list
 
 # TODO
 # class DirectoryIterator(Iterator):
