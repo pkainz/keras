@@ -686,9 +686,9 @@ class NumpyArrayIterator(Iterator):
         else:
             return batch_x_list
 
-# TODO
+
 # class DirectoryIterator(Iterator):
-# 
+#  
 #     def __init__(self, directory, image_data_generator,
 #                  target_size=(32, 32, 32), color_mode='grayscale',
 #                  dim_ordering=K.image_dim_ordering,
@@ -722,12 +722,12 @@ class NumpyArrayIterator(Iterator):
 #         self.save_to_dir = save_to_dir
 #         self.save_prefix = save_prefix
 #         self.save_format = save_format
-# 
+#  
 #         white_list_formats = {'png', 'jpg', 'jpeg', 'bmp'}
-# 
+#  
 #         # first, count the number of samples and classes
 #         self.nb_sample = 0
-# 
+#  
 #         if not classes:
 #             classes = []
 #             for subdir in os.listdir(directory):
@@ -735,7 +735,7 @@ class NumpyArrayIterator(Iterator):
 #                     classes.append(subdir)
 #         self.nb_class = len(classes)
 #         self.class_indices = dict(zip(classes, range(len(classes))))
-# 
+#  
 #         for subdir in classes:
 #             subpath = os.path.join(directory, subdir)
 #             for fname in os.listdir(subpath):
@@ -747,7 +747,7 @@ class NumpyArrayIterator(Iterator):
 #                 if is_valid:
 #                     self.nb_sample += 1
 #         print('Found %d images belonging to %d classes.' % (self.nb_sample, self.nb_class))
-# 
+#  
 #         # second, build an index of the images in the different class subfolders
 #         self.filenames = []
 #         self.classes = np.zeros((self.nb_sample,), dtype='int32')
@@ -765,7 +765,7 @@ class NumpyArrayIterator(Iterator):
 #                     self.filenames.append(os.path.join(subdir, fname))
 #                     i += 1
 #         super(DirectoryIterator, self).__init__(self.nb_sample, batch_size, shuffle, seed)
-# 
+#  
 #     def next(self):
 #         with self.lock:
 #             index_array, current_index, current_batch_size = next(self.index_generator)
