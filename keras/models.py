@@ -238,6 +238,7 @@ class Sequential(Model):
         self.model = None  # internal Model instance
         self.inputs = []  # tensors
         self.outputs = []  # tensors (length 1)
+        self.trainable = True
 
         # model attributes
         self.inbound_nodes = []
@@ -337,6 +338,23 @@ class Sequential(Model):
             self.inbound_nodes[0].output_tensors = self.outputs
             self.inbound_nodes[0].output_shapes = [self.outputs[0]._keras_shape]
         self.built = False
+        self._flattened_layers = None
+
+    def get_layer(self, name=None, index=None):
+        '''Returns a layer based on either its name (unique)
+        or its index in the graph. Indices are based on
+        order of horizontal graph traversal (bottom-up).
+
+        # Arguments
+            name: string, name of layer.
+            index: integer, index of layer.
+
+        # Returns
+            A layer instance.
+        '''
+        if not self.built:
+            self.build()
+        return self.model.get_layer(name, index)
 
     def call(self, x, mask=None):
         if not self.built:
@@ -421,13 +439,19 @@ class Sequential(Model):
 
     @property
     def trainable_weights(self):
+        if not self.trainable:
+            return []
         # support for legacy behavior
         return self._gather_list_attr('trainable_weights')
 
     @property
     def non_trainable_weights(self):
         # support for legacy behavior
-        return self._gather_list_attr('non_trainable_weights')
+        weights = self._gather_list_attr('non_trainable_weights')
+        if not self.trainable:
+            trainable_weights = self._gather_list_attr('trainable_weights')
+            return trainable_weights + weights
+        return weights
 
     @property
     def updates(self):
@@ -467,7 +491,7 @@ class Sequential(Model):
         '''
         # support for legacy behavior
         for layer in self.flattened_layers:
-            nb_param = len(layer.get_weights())
+            nb_param = len(layer.weights)
             layer.set_weights(weights[:nb_param])
             weights = weights[nb_param:]
 
@@ -794,7 +818,7 @@ class Sequential(Model):
             max_q_size: maximum size for the generator queue
             nb_worker: maximum number of processes to spin up
             pickle_safe: if True, use process based threading. Note that because
-                this implementation relies on multiprocessing, you should not pass non
+                this implementation relies on multiprocessing, you should not pass
                 non picklable arguments to the generator as they can't be passed
                 easily to children processes.
 

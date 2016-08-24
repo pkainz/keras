@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 from .generic_utils import get_from_module
+from .np_utils import convert_kernel
 from ..layers import *
 from ..models import Model, Sequential, Graph
 from .. import backend as K
@@ -60,6 +61,7 @@ def print_summary(layers, relevant_nodes=None, line_length=200, positions=[.33, 
             output_shape = layer.output_shape
         except Exception as e:
             print(e)
+        except:
             output_shape = 'multiple'
         connections = []
         for node_index, node in enumerate(layer.inbound_nodes):
@@ -98,8 +100,26 @@ def print_summary(layers, relevant_nodes=None, line_length=200, positions=[.33, 
 
     print('Total params: %s' % total_params)
     print('_' * line_length)
-    
-    
+
+
+def convert_all_kernels_in_model(model):
+    # Note: SeparableConvolution not included
+    # since only supported by TF.
+    conv_classes = {
+        'Convolution1D',
+        'Convolution2D',
+        'Convolution3D',
+        'AtrousConvolution2D',
+        'Deconvolution2D',
+    }
+    to_assign = []
+    for layer in model.layers:
+        if layer.__class__.__name__ in conv_classes:
+            original_w = K.get_value(layer.W)
+            converted_w = convert_kernel(original_w)
+            to_assign.append((layer.W, converted_w))
+    K.batch_set_value(to_assign)
+
 
 def print_structure(weight_file_path):
     """
