@@ -20,7 +20,7 @@ class SumLayer(Layer):
 
 
 class DePool2D(UpSampling2D):
-    '''Simplar to UpSample, yet traverse only pooled elements
+    '''Similar to UpSample, yet traverse only pooled elements
 
     # Input shape
         4D tensor with shape:
