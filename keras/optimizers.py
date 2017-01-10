@@ -10,7 +10,7 @@ def clip_norm(g, c, n):
     return g
 
 
-def optimizer_from_config(config, custom_objects={}):
+def optimizer_from_config(config, custom_objects=None):
     all_classes = {
         'sgd': SGD,
         'rmsprop': RMSprop,
@@ -19,9 +19,10 @@ def optimizer_from_config(config, custom_objects={}):
         'adam': Adam,
         'adamax': Adamax,
         'nadam': Nadam,
+        'tfoptimizer': TFOptimizer,
     }
     class_name = config['class_name']
-    if class_name in custom_objects:
+    if custom_objects and class_name in custom_objects:
         cls = custom_objects[class_name]
     else:
         if class_name.lower() not in all_classes:
@@ -47,19 +48,11 @@ class Optimizer(object):
         allowed_kwargs = {'clipnorm', 'clipvalue'}
         for k in kwargs:
             if k not in allowed_kwargs:
-                raise Exception('Unexpected keyword argument '
+                raise TypeError('Unexpected keyword argument '
                                 'passed to optimizer: ' + str(k))
         self.__dict__.update(kwargs)
         self.updates = []
         self.weights = []
-
-    def get_state(self):
-        return [K.get_value(u[0]) for u in self.updates]
-
-    def set_state(self, value_list):
-        assert len(self.updates) == len(value_list)
-        for u, v in zip(self.updates, value_list):
-            K.set_value(u[0], v)
 
     def get_updates(self, params, constraints, loss):
         raise NotImplementedError
@@ -91,10 +84,10 @@ class Optimizer(object):
         param_values = K.batch_get_value(params)
         for pv, p, w in zip(param_values, params, weights):
             if pv.shape != w.shape:
-                raise Exception('Optimizer weight shape ' +
-                                str(pv.shape) +
-                                ' not compatible with '
-                                'provided weight shape ' + str(w.shape))
+                raise ValueError('Optimizer weight shape ' +
+                                 str(pv.shape) +
+                                 ' not compatible with '
+                                 'provided weight shape ' + str(w.shape))
             weight_value_tuples.append((p, w))
         K.batch_set_value(weight_value_tuples)
 
@@ -230,6 +223,7 @@ class RMSprop(Optimizer):
     def get_config(self):
         config = {'lr': float(K.get_value(self.lr)),
                   'rho': float(K.get_value(self.rho)),
+                  'decay': float(K.get_value(self.decay)),
                   'epsilon': self.epsilon}
         base_config = super(RMSprop, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
@@ -281,6 +275,7 @@ class Adagrad(Optimizer):
 
     def get_config(self):
         config = {'lr': float(K.get_value(self.lr)),
+                  'decay': float(K.get_value(self.decay)),
                   'epsilon': self.epsilon}
         base_config = super(Adagrad, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
@@ -346,6 +341,7 @@ class Adadelta(Optimizer):
     def get_config(self):
         config = {'lr': float(K.get_value(self.lr)),
                   'rho': self.rho,
+                  'decay': float(K.get_value(self.decay)),
                   'epsilon': self.epsilon}
         base_config = super(Adadelta, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
@@ -411,6 +407,7 @@ class Adam(Optimizer):
         config = {'lr': float(K.get_value(self.lr)),
                   'beta_1': float(K.get_value(self.beta_1)),
                   'beta_2': float(K.get_value(self.beta_2)),
+                  'decay': float(K.get_value(self.decay)),
                   'epsilon': self.epsilon}
         base_config = super(Adam, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
@@ -450,7 +447,7 @@ class Adamax(Optimizer):
             lr *= (1. / (1. + self.decay * self.iterations))
 
         t = self.iterations + 1
-        lr_t = self.lr / (1. - K.pow(self.beta_1, t))
+        lr_t = lr / (1. - K.pow(self.beta_1, t))
 
         shapes = [K.get_variable_shape(p) for p in params]
         # zero init of 1st moment
@@ -480,6 +477,7 @@ class Adamax(Optimizer):
         config = {'lr': float(K.get_value(self.lr)),
                   'beta_1': float(K.get_value(self.beta_1)),
                   'beta_2': float(K.get_value(self.beta_2)),
+                  'decay': float(K.get_value(self.decay)),
                   'epsilon': self.epsilon}
         base_config = super(Adamax, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
@@ -565,6 +563,36 @@ class Nadam(Optimizer):
         return dict(list(base_config.items()) + list(config.items()))
 
 
+class TFOptimizer(Optimizer):
+
+    def __init__(self, optimizer):
+        self.optimizer = optimizer
+        self.iterations = K.variable(0.)
+        self.updates = []
+
+    def get_updates(self, params, constraints, loss):
+        if constraints:
+            raise ValueError('TF optimizers do not support '
+                             'weights constraints. Either remove '
+                             'all weights constraints in your model, '
+                             'or use a Keras optimizer.')
+        grads = self.optimizer.compute_gradients(loss, params)
+        opt_update = self.optimizer.apply_gradients(
+            grads, global_step=self.iterations)
+        self.updates.append(opt_update)
+        return self.updates
+
+    @property
+    def weights(self):
+        raise NotImplementedError
+
+    def get_config(self):
+        raise NotImplementedError
+
+    def from_config(self, config):
+        raise NotImplementedError
+
+
 # aliases
 sgd = SGD
 rmsprop = RMSprop
@@ -576,5 +604,11 @@ nadam = Nadam
 
 
 def get(identifier, kwargs=None):
+    if K.backend() == 'tensorflow':
+        # Wrap TF optimizer instances
+        import tensorflow as tf
+        if isinstance(identifier, tf.train.Optimizer):
+            return TFOptimizer(identifier)
+    # Instantiate a Keras optimizer
     return get_from_module(identifier, globals(), 'optimizer',
                            instantiate=True, kwargs=kwargs)

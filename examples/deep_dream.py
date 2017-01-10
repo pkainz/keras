@@ -75,10 +75,12 @@ def deprocess_image(x):
         x = x.transpose((1, 2, 0))
     else:
         x = x.reshape((img_width, img_height, 3))
-    x = x[:, :, ::-1]
+    # Remove zero-center by mean pixel
     x[:, :, 0] += 103.939
     x[:, :, 1] += 116.779
     x[:, :, 2] += 123.68
+    # 'BGR'->'RGB'
+    x = x[:, :, ::-1]
     x = np.clip(x, 0, 255).astype('uint8')
     return x
 
@@ -138,7 +140,7 @@ loss += settings['dream_l2'] * K.sum(K.square(dream)) / np.prod(img_size)
 grads = K.gradients(loss, dream)
 
 outputs = [loss]
-if type(grads) in {list, tuple}:
+if isinstance(grads, (list, tuple)):
     outputs += grads
 else:
     outputs.append(grads)

@@ -47,7 +47,7 @@ from scipy.optimize import fmin_l_bfgs_b
 from scipy.misc import imread, imsave
 
 from keras import backend as K
-from keras.layers import Input, Convolution2D, MaxPooling2D, AveragePooling2D
+from keras.layers import Input, AveragePooling2D
 from keras.models import Model
 from keras.preprocessing.image import load_img, img_to_array
 from keras.applications import vgg19
@@ -108,10 +108,12 @@ def deprocess_image(x):
         x = x.transpose((1, 2, 0))
     else:
         x = x.reshape((img_nrows, img_ncols, 3))
-    x = x[:, :, ::-1]
+    # Remove zero-center by mean pixel
     x[:, :, 0] += 103.939
     x[:, :, 1] += 116.779
     x[:, :, 2] += 123.68
+    # 'BGR'->'RGB'
+    x = x[:, :, ::-1]
     x = np.clip(x, 0, 255).astype('uint8')
     return x
 
@@ -299,7 +301,7 @@ loss_grads = K.gradients(loss, target_image)
 
 # Evaluator class for computing efficiency
 outputs = [loss]
-if type(loss_grads) in {list, tuple}:
+if isinstance(loss_grads, (list, tuple)):
     outputs += loss_grads
 else:
     outputs.append(loss_grads)

@@ -1,7 +1,8 @@
 from __future__ import absolute_import
 import numpy as np
 from . import backend as K
-import theano
+from .utils.generic_utils import get_from_module
+
 
 def mean_squared_error(y_true, y_pred):
     return K.mean(K.square(y_pred - y_true), axis=-1)
@@ -77,6 +78,7 @@ kld = KLD = kullback_leibler_divergence
 cosine = cosine_proximity
 sse = SSE = sum_squared_error
 
-from .utils.generic_utils import get_from_module
+
 def get(identifier):
     return get_from_module(identifier, globals(), 'objective')
+
