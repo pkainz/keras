@@ -1,6 +1,6 @@
-'''
+"""
 Basic set of tools for real-time data augmentation on volume data using SimpleITK wrappers.
-'''
+"""
 from __future__ import absolute_import
 from __future__ import print_function
 
@@ -26,32 +26,32 @@ def random_rotation(x, rg_xy, rg_yz, rg_xz, depth_index=1, row_index=2, col_inde
         theta = np.pi / 180 * np.random.uniform(-rg_xy, rg_xy)
         rotation_matrix_xy = np.array([[np.cos(theta), -np.sin(theta), 0, 0],
                                        [np.sin(theta), np.cos(theta), 0, 0],
-                                       [0, 0, 1, 0], 
+                                       [0, 0, 1, 0],
                                        [0, 0, 0, 1]])
     else:
         rotation_matrix_xy = np.eye(4)
-    
+
     if rg_yz:
         theta = np.pi / 180 * np.random.uniform(-rg_yz, rg_xz)
         rotation_matrix_yz = np.array([[1, 0, 0, 0],
                                        [0, np.cos(theta), -np.sin(theta), 0],
-                                       [0, np.sin(theta), np.cos(theta), 0], 
+                                       [0, np.sin(theta), np.cos(theta), 0],
                                        [0, 0, 0, 1]])
     else:
         rotation_matrix_yz = np.eye(4)
-    
+
     if rg_xz:
         theta = np.pi / 180 * np.random.uniform(-rg_xz, rg_xz)
         rotation_matrix_xz = np.array([[np.cos(theta), 0, np.sin(theta), 0],
                                        [0, 1, 0, 0],
-                                       [-np.sin(theta), 0, np.cos(theta), 0], 
+                                       [-np.sin(theta), 0, np.cos(theta), 0],
                                        [0, 0, 0, 1]])
     else:
         rotation_matrix_xz = np.eye(4)
 
     # 3D rotation matrix with separate angles
-    rotation_matrix = np.dot(np.dot(rotation_matrix_xy,rotation_matrix_yz),rotation_matrix_xz)
-    
+    rotation_matrix = np.dot(np.dot(rotation_matrix_xy, rotation_matrix_yz), rotation_matrix_xz)
+
     d, h, w = x.shape[depth_index], x.shape[row_index], x.shape[col_index]
     transform_matrix = transform_matrix_offset_center(rotation_matrix, d, h, w)
     x = apply_transform(x, transform_matrix, channel_index, fill_mode, cval)
@@ -77,6 +77,8 @@ def random_shift(x, drg, wrg, hrg, depth_index=1, row_index=2, col_index=3, chan
 def random_shear(x, intensity, depth_index=1, row_index=2, col_index=3, channel_index=0,
                  fill_mode='nearest', cval=0.):
     raise NotImplementedError('random_shear 3D is not yet implemented!')
+
+
 #     shear = np.random.uniform(-intensity, intensity)
 #     shear_matrix = np.array([[1, -np.sin(shear), 0],
 #                              [0, np.cos(shear), 0],
@@ -98,7 +100,7 @@ def random_zoom(x, zoom_range, depth_index=1, row_index=2, col_index=3, channel_
         zz = zy = zx = 1
     else:
         zz, zy, zx = np.random.uniform(zoom_range[0], zoom_range[1], 3)
-        
+
         # 3D zooming
         zoom_matrix = np.array([[zx, 0, 0],
                                 [0, zy, 0],
@@ -125,7 +127,7 @@ def random_channel_shift(x, intensity, channel_index=0):
     channel_images = [np.clip(x_channel + np.random.uniform(-intensity, intensity), min_x, max_x)
                       for x_channel in x]
     x = np.stack(channel_images, axis=0)
-    x = np.rollaxis(x, 0, channel_index+1)
+    x = np.rollaxis(x, 0, channel_index + 1)
     return x
 
 
@@ -144,14 +146,17 @@ def apply_transform(x, transform_matrix, channel_index=0, fill_mode='nearest', c
     final_affine_matrix = transform_matrix[:3, :3]
     final_offset = transform_matrix[:3, 3]
     channel_images = [ndi.interpolation.affine_transform(x_channel, final_affine_matrix,
-                      final_offset, order=0, mode=fill_mode, cval=cval) for x_channel in x]
+                                                         final_offset, order=0, mode=fill_mode, cval=cval) for x_channel
+                      in x]
     x = np.stack(channel_images, axis=0)
-    x = np.rollaxis(x, 0, channel_index+1)
+    x = np.rollaxis(x, 0, channel_index + 1)
     return x
 
 
 def flip_axis(x, axis):
     raise NotImplementedError('flip_axis 3D is not yet implemented!')
+
+
 #     x = np.asarray(x).swapaxes(axis, 0)
 #     x = x[::-1, ...]
 #     x = x.swapaxes(0, axis)
@@ -161,7 +166,7 @@ def flip_axis(x, axis):
 def array_to_img(x, dim_ordering=K.image_dim_ordering(), scale=False):
     if dim_ordering == 'th':
         x = x.transpose(1, 2, 3, 0)
-    
+
     if scale:
         x += max(-np.min(x), 0)
         x /= np.max(x)
@@ -182,11 +187,11 @@ def img_to_array(img, dim_ordering=K.image_dim_ordering()):
     if dim_ordering not in ['th', 'tf']:
         raise Exception('Unknown dim_ordering: ', dim_ordering)
     # image has dim_ordering (depth, height, width, channels)
-    #print(img.GetSize())
+    # print(img.GetSize())
     x = itk_to_np(img)
     x = np.asarray(x, dtype='float32')
-    #print(x.shape)
-    if len(x.shape) == 4: 
+    # print(x.shape)
+    if len(x.shape) == 4:
         if dim_ordering == 'th':
             x = x.transpose(3, 0, 1, 2)
     elif len(x.shape) == 3:
@@ -224,11 +229,11 @@ def load_img(path, target_size=None):
         The image as an instance of SimpleITK.SimpleITK.Image
     '''
     img = sitk.ReadImage(path)
-    
+
     # TODO resize the image to the target size
     if target_size is not None:
         raise NotImplementedError('Using target_size is not yet implemented!')
-    
+
     return img
 
 
@@ -275,6 +280,7 @@ class VolumeDataGenerator(object):
             If you never set it, then it will be "th".
         (unused) nb_inputs: Number of inputs to the model. Default is 1.
     '''
+
     def __init__(self,
                  featurewise_center=False,
                  samplewise_center=False,
@@ -298,9 +304,9 @@ class VolumeDataGenerator(object):
                  dim_ordering=K.image_dim_ordering(),
                  nb_inputs=1):
         self.__dict__.update(locals())
-#         self.mean = [None]*nb_inputs
-#         self.std = [None]*nb_inputs
-#         self.principal_components = [None]*nb_inputs
+        #         self.mean = [None]*nb_inputs
+        #         self.std = [None]*nb_inputs
+        #         self.principal_components = [None]*nb_inputs
         self.rescale = rescale
 
         if dim_ordering not in {'tf', 'th'}:
@@ -354,13 +360,14 @@ class VolumeDataGenerator(object):
                             save_to_dir=None, save_prefix='', save_format='mha'):
         raise NotImplementedError('flow_from_directory is not yet implemented!')
         # TODO implement
-#         return DirectoryIterator(
-#             directory, self,
-#             target_size=target_size, color_mode=color_mode,
-#             classes=classes, class_mode=class_mode,
-#             dim_ordering=self.dim_ordering,
-#             batch_size=batch_size, shuffle=shuffle, seed=seed,
-#             save_to_dir=save_to_dir, save_prefix=save_prefix, save_format=save_format)
+
+    #         return DirectoryIterator(
+    #             directory, self,
+    #             target_size=target_size, color_mode=color_mode,
+    #             classes=classes, class_mode=class_mode,
+    #             dim_ordering=self.dim_ordering,
+    #             batch_size=batch_size, shuffle=shuffle, seed=seed,
+    #             save_to_dir=save_to_dir, save_prefix=save_prefix, save_format=save_format)
 
     def standardize_batch(self, X):
         '''
@@ -374,11 +381,11 @@ class VolumeDataGenerator(object):
         '''
         if not isinstance(X, list):
             X = [X]
-        
+
         for ipt_idx in xrange(len(X)):
             for j in xrange(len(X[ipt_idx])):
                 X[ipt_idx][j] = self.standardize(X[ipt_idx][j], ipt_idx)
-        
+
         return X
 
     def standardize(self, x, ipt_idx=0):
@@ -407,15 +414,15 @@ class VolumeDataGenerator(object):
         return x
 
     def random_transform(self, x):
-        #print(x.shape)
-        #print(locals())
+        # print(x.shape)
+        # print(locals())
         # x is a single image, so it doesn't have image number at index 0
         img_depth_index = self.depth_index - 1
         img_row_index = self.row_index - 1
         img_col_index = self.col_index - 1
         img_channel_index = self.channel_index - 1
-        
-        #print(img_depth_index,img_row_index,img_col_index,img_channel_index)
+
+        # print(img_depth_index,img_row_index,img_col_index,img_channel_index)
 
         # use composition of homographies to generate final transform that needs to be applied
         ####################################### rotation in XY, YZ, XZ separately
@@ -423,38 +430,38 @@ class VolumeDataGenerator(object):
             theta = np.pi / 180 * np.random.uniform(-self.rotation_range_xy, self.rotation_range_xy)
             rotation_matrix_xy = np.array([[np.cos(theta), -np.sin(theta), 0, 0],
                                            [np.sin(theta), np.cos(theta), 0, 0],
-                                           [0, 0, 1, 0], 
+                                           [0, 0, 1, 0],
                                            [0, 0, 0, 1]])
         else:
             rotation_matrix_xy = np.eye(4)
-        
+
         if self.rotation_range_yz:
             theta = np.pi / 180 * np.random.uniform(-self.rotation_range_yz, self.rotation_range_xz)
             rotation_matrix_yz = np.array([[1, 0, 0, 0],
                                            [0, np.cos(theta), -np.sin(theta), 0],
-                                           [0, np.sin(theta), np.cos(theta), 0], 
+                                           [0, np.sin(theta), np.cos(theta), 0],
                                            [0, 0, 0, 1]])
         else:
             rotation_matrix_yz = np.eye(4)
-        
+
         if self.rotation_range_xz:
             theta = np.pi / 180 * np.random.uniform(-self.rotation_range_xz, self.rotation_range_xz)
             rotation_matrix_xz = np.array([[np.cos(theta), 0, np.sin(theta), 0],
                                            [0, 1, 0, 0],
-                                           [-np.sin(theta), 0, np.cos(theta), 0], 
+                                           [-np.sin(theta), 0, np.cos(theta), 0],
                                            [0, 0, 0, 1]])
         else:
             rotation_matrix_xz = np.eye(4)
 
         # 3D rotation matrix with separate angles
-        rotation_matrix = np.dot(np.dot(rotation_matrix_xy,rotation_matrix_yz),rotation_matrix_xz)
-        
+        rotation_matrix = np.dot(np.dot(rotation_matrix_xy, rotation_matrix_yz), rotation_matrix_xz)
+
         ####################################### translation in z,y,x separately
         if self.depth_shift_range:
             tz = np.random.uniform(-self.depth_shift_range, self.depth_shift_range) * x.shape[img_depth_index]
         else:
             tz = 0
-            
+
         if self.height_shift_range:
             ty = np.random.uniform(-self.height_shift_range, self.height_shift_range) * x.shape[img_row_index]
         else:
@@ -464,29 +471,28 @@ class VolumeDataGenerator(object):
             tx = np.random.uniform(-self.width_shift_range, self.width_shift_range) * x.shape[img_col_index]
         else:
             tx = 0
-            
+
         # 3D translation
         translation_matrix = np.array([[1, 0, 0, tx],
                                        [0, 1, 0, ty],
                                        [0, 0, 1, tz],
-                                       [0, 0, 0, 1 ]])
-        
-#         if self.shear_range:
-#             shear = np.random.uniform(-self.shear_range, self.shear_range)
-#         else:
-#             shear = 0
-#         shear_matrix = np.array([[1, -np.sin(shear), 0],
-#                                  [0, np.cos(shear), 0],
-#                                  [0, 0, 1]])
+                                       [0, 0, 0, 1]])
+
+        #         if self.shear_range:
+        #             shear = np.random.uniform(-self.shear_range, self.shear_range)
+        #         else:
+        #             shear = 0
+        #         shear_matrix = np.array([[1, -np.sin(shear), 0],
+        #                                  [0, np.cos(shear), 0],
+        #                                  [0, 0, 1]])
         # TODO implement 3D shearing
         shear_matrix = np.eye(4)
-
 
         if self.zoom_range[0] == 1 and self.zoom_range[1] == 1:
             zz = zy = zx = 1
         else:
             zz, zy, zx = np.random.uniform(self.zoom_range[0], self.zoom_range[1], 3)
-        
+
         # 3D zooming
         zoom_matrix = np.array([[zx, 0, 0, 0],
                                 [0, zy, 0, 0],
@@ -499,18 +505,18 @@ class VolumeDataGenerator(object):
         transform_matrix = transform_matrix_offset_center(transform_matrix, d, h, w)
         x = apply_transform(x, transform_matrix, img_channel_index,
                             fill_mode=self.fill_mode, cval=self.cval)
-        
+
         # channel shift range
         if self.channel_shift_range != 0:
             x = random_channel_shift(x, self.channel_shift_range, img_channel_index)
 
-#         if self.horizontal_flip:
-#             if np.random.random() < 0.5:
-#                 x = flip_axis(x, img_col_index)
-# 
-#         if self.vertical_flip:
-#             if np.random.random() < 0.5:
-#                 x = flip_axis(x, img_row_index)
+        #         if self.horizontal_flip:
+        #             if np.random.random() < 0.5:
+        #                 x = flip_axis(x, img_col_index)
+        #
+        #         if self.vertical_flip:
+        #             if np.random.random() < 0.5:
+        #                 x = flip_axis(x, img_row_index)
 
         # TODO:
         # channel-wise normalization
@@ -536,10 +542,10 @@ class VolumeDataGenerator(object):
         # if the passed data is not already a list, prepare the generator
         if not isinstance(X, list):
             X = [X]
-        self.mean = [None]*len(X)
-        self.std = [None]*len(X)
-        self.principal_components = [None]*len(X)
-        
+        self.mean = [None] * len(X)
+        self.std = [None] * len(X)
+        self.principal_components = [None] * len(X)
+
         for ipt_idx in xrange(len(X)):
             X_ = np.copy(X[ipt_idx])
             if augment:
@@ -548,25 +554,25 @@ class VolumeDataGenerator(object):
                     for i in range(X_.shape[0]):
                         aX[i + r * X_.shape[0]] = self.random_transform(X_[i])
                 X_ = aX
-    
+
             if self.featurewise_center:
                 self.mean[ipt_idx] = np.mean(X_, axis=0)
                 X_ -= self.mean[ipt_idx]
-    
+
             if self.featurewise_std_normalization:
                 self.std[ipt_idx] = np.std(X_, axis=0)
                 X_ /= (self.std[ipt_idx] + 1e-7)
-    
+
             if self.zca_whitening:
                 flatX = np.reshape(X_, (X_.shape[0], X_.shape[1] * X_.shape[2] * X_.shape[3] * X_.shape[4]))
                 sigma = np.dot(flatX.T, flatX) / flatX.shape[1]
                 U, S, V = linalg.svd(sigma)
                 self.principal_components[ipt_idx] = np.dot(np.dot(U, np.diag(1. / np.sqrt(S + 10e-7))), U.T)
-        
+
         return self.mean, self.std, self.principal_components
 
-class Iterator(object):
 
+class Iterator(object):
     def __init__(self, N, batch_size, shuffle, seed):
         self.N = N
         self.batch_size = batch_size
@@ -612,7 +618,6 @@ class Iterator(object):
 
 
 class NumpyArrayIterator(Iterator):
-
     def __init__(self, X, y, image_data_generator,
                  batch_size=32, shuffle=False, seed=None,
                  dim_ordering=K.image_dim_ordering(),
@@ -627,9 +632,9 @@ class NumpyArrayIterator(Iterator):
         # wrap the input in a list
         if not isinstance(X, list):
             X = [X]
-        
+
         # check if number of samples are the same in all X's and y
-        X_lens = list(set([ X_.shape[0] for X_ in X ]))
+        X_lens = list(set([X_.shape[0] for X_ in X]))
         if not len(X_lens) == 1:
             raise Exception('All inputs in X should have the same length.')
         n_samples = X_lens[0]
@@ -638,7 +643,7 @@ class NumpyArrayIterator(Iterator):
             raise Exception('X (images tensor) and y (labels) '
                             'should have the same length. '
                             'Found: X.shape = %s, y.shape = %s' % (np.asarray(X[0]).shape, np.asarray(y).shape))
-        
+
         self.X = X
         self.y = y
         self.image_data_generator = image_data_generator
@@ -656,36 +661,35 @@ class NumpyArrayIterator(Iterator):
         with self.lock:
             index_array, current_index, current_batch_size = next(self.index_generator)
         # The transformation of images is not under thread lock so it can be done in parallel
-        batch_x_list = [None]*len(self.X)
+        batch_x_list = [None] * len(self.X)
         for ipt_idx in xrange(len(self.X)):
-            #print('Processing input idx %s'%ipt_idx)
+            # print('Processing input idx %s'%ipt_idx)
             batch_x = np.zeros(tuple([current_batch_size] + list(self.X[ipt_idx].shape)[1:]))
             for i, j in enumerate(index_array):
                 x = self.X[ipt_idx][j]
                 x = self.image_data_generator.random_transform(x.astype('float32'))
-                x = self.image_data_generator.standardize(x,ipt_idx)
+                x = self.image_data_generator.standardize(x, ipt_idx)
                 batch_x[i] = x
             if self.save_to_dir:
                 for i in range(current_batch_size):
                     # convert image to sitk
                     img = array_to_img(batch_x[i], self.dim_ordering, scale=False)
                     fname = '{prefix}_{input}_{index}_{hash}.{format}'.format(
-                                                                      input=str(ipt_idx),
-                                                                      prefix=self.save_prefix,
-                                                                      index=current_index + i,
-                                                                      hash=np.random.randint(1e4),
-                                                                      format=self.save_format)
-                    sitk.WriteImage(img,os.path.join(self.save_to_dir, fname))
+                        input=str(ipt_idx),
+                        prefix=self.save_prefix,
+                        index=current_index + i,
+                        hash=np.random.randint(1e4),
+                        format=self.save_format)
+                    sitk.WriteImage(img, os.path.join(self.save_to_dir, fname))
             batch_x_list[ipt_idx] = batch_x
-            
+
         if not self.y is None:
             batch_y = self.y[index_array]
             # TODO this must return a list of inputs (for each)
             # e.g. return [batch_x1,batch_x2],batch_y
-            return batch_x_list,batch_y
+            return batch_x_list, batch_y
         else:
             return batch_x_list
-
 
 # class DirectoryIterator(Iterator):
 #  
