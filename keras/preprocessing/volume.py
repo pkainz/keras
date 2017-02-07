@@ -8,7 +8,7 @@ import numpy as np
 import re
 from scipy import linalg
 import scipy.ndimage as ndi
-from six.moves import range
+import six
 import os
 import threading
 
@@ -382,8 +382,8 @@ class VolumeDataGenerator(object):
         if not isinstance(X, list):
             X = [X]
 
-        for ipt_idx in xrange(len(X)):
-            for j in xrange(len(X[ipt_idx])):
+        for ipt_idx in six.moves.range(len(X)):
+            for j in six.moves.range(len(X[ipt_idx])):
                 X[ipt_idx][j] = self.standardize(X[ipt_idx][j], ipt_idx)
 
         return X
@@ -510,7 +510,7 @@ class VolumeDataGenerator(object):
         if self.channel_shift_range != 0:
             x = random_channel_shift(x, self.channel_shift_range, img_channel_index)
 
-        #         if self.horizontal_flip:
+        # if self.horizontal_flip:
         #             if np.random.random() < 0.5:
         #                 x = flip_axis(x, img_col_index)
         #
@@ -546,12 +546,12 @@ class VolumeDataGenerator(object):
         self.std = [None] * len(X)
         self.principal_components = [None] * len(X)
 
-        for ipt_idx in xrange(len(X)):
+        for ipt_idx in six.moves.range(len(X)):
             X_ = np.copy(X[ipt_idx])
             if augment:
                 aX = np.zeros(tuple([rounds * X_.shape[0]] + list(X_.shape)[1:]))
-                for r in range(rounds):
-                    for i in range(X_.shape[0]):
+                for r in six.moves.range(rounds):
+                    for i in six.moves.range(X_.shape[0]):
                         aX[i + r * X_.shape[0]] = self.random_transform(X_[i])
                 X_ = aX
 
@@ -662,7 +662,7 @@ class NumpyArrayIterator(Iterator):
             index_array, current_index, current_batch_size = next(self.index_generator)
         # The transformation of images is not under thread lock so it can be done in parallel
         batch_x_list = [None] * len(self.X)
-        for ipt_idx in xrange(len(self.X)):
+        for ipt_idx in six.moves.range(len(self.X)):
             # print('Processing input idx %s'%ipt_idx)
             batch_x = np.zeros(tuple([current_batch_size] + list(self.X[ipt_idx].shape)[1:]))
             for i, j in enumerate(index_array):
@@ -671,7 +671,7 @@ class NumpyArrayIterator(Iterator):
                 x = self.image_data_generator.standardize(x, ipt_idx)
                 batch_x[i] = x
             if self.save_to_dir:
-                for i in range(current_batch_size):
+                for i in six.moves.range(current_batch_size):
                     # convert image to sitk
                     img = array_to_img(batch_x[i], self.dim_ordering, scale=False)
                     fname = '{prefix}_{input}_{index}_{hash}.{format}'.format(
@@ -738,7 +738,7 @@ class NumpyArrayIterator(Iterator):
 #                 if os.path.isdir(os.path.join(directory, subdir)):
 #                     classes.append(subdir)
 #         self.nb_class = len(classes)
-#         self.class_indices = dict(zip(classes, range(len(classes))))
+#         self.class_indices = dict(zip(classes, six.moves.range(len(classes))))
 #  
 #         for subdir in classes:
 #             subpath = os.path.join(directory, subdir)
@@ -786,7 +786,7 @@ class NumpyArrayIterator(Iterator):
 #             batch_x[i] = x
 #         # optionally save augmented images to disk for debugging purposes
 #         if self.save_to_dir:
-#             for i in range(current_batch_size):
+#             for i in six.moves.range(current_batch_size):
 #                 img = array_to_img(batch_x[i], self.dim_ordering, scale=True)
 #                 fname = '{prefix}_{index}_{hash}.{format}'.format(prefix=self.save_prefix,
 #                                                                   index=current_index + i,
