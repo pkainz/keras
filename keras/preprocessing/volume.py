@@ -101,21 +101,16 @@ def random_zoom(x, zoom_range, depth_index=1, row_index=2, col_index=3, channel_
     else:
         zz, zy, zx = np.random.uniform(zoom_range[0], zoom_range[1], 3)
 
-        # 3D zooming
-        zoom_matrix = np.array([[zx, 0, 0],
-                                [0, zy, 0],
-                                [0, 0, zz],
-                                [0, 0, 1]])
+    # 3D zooming
+    zoom_matrix = np.array([[zx, 0, 0],
+                            [0, zy, 0],
+                            [0, 0, zz],
+                            [0, 0, 1]])
 
     d, h, w = x.shape[depth_index], x.shape[row_index], x.shape[col_index]
     transform_matrix = transform_matrix_offset_center(zoom_matrix, d, h, w)
     x = apply_transform(x, transform_matrix, channel_index, fill_mode, cval)
     return x
-
-
-def random_barrel_transform(x, intensity):
-    # TODO
-    pass
 
 
 def random_channel_shift(x, intensity, channel_index=0):
@@ -135,8 +130,14 @@ def transform_matrix_offset_center(matrix, z, y, x):
     o_x = float(x) / 2 + 0.5
     o_y = float(y) / 2 + 0.5
     o_z = float(z) / 2 + 0.5
-    offset_matrix = np.array([[1, 0, 0, o_x], [0, 1, 0, o_y], [0, 0, 1, o_z], [0, 0, 0, 1]])
-    reset_matrix = np.array([[1, 0, 0, -o_x], [0, 1, 0, -o_y], [0, 0, 1, -o_z], [0, 0, 0, 1]])
+    offset_matrix = np.array([[1, 0, 0, o_x],
+                              [0, 1, 0, o_y],
+                              [0, 0, 1, o_z],
+                              [0, 0, 0, 1]])
+    reset_matrix = np.array([[1, 0, 0, -o_x],
+                             [0, 1, 0, -o_y],
+                             [0, 0, 1, -o_z],
+                             [0, 0, 0, 1]])
     transform_matrix = np.dot(np.dot(offset_matrix, matrix), reset_matrix)
     return transform_matrix
 
@@ -146,21 +147,11 @@ def apply_transform(x, transform_matrix, channel_index=0, fill_mode='nearest', c
     final_affine_matrix = transform_matrix[:3, :3]
     final_offset = transform_matrix[:3, 3]
     channel_images = [ndi.interpolation.affine_transform(x_channel, final_affine_matrix,
-                                                         final_offset, order=0, mode=fill_mode, cval=cval) for x_channel
-                      in x]
+                                                         final_offset, order=0, mode=fill_mode, cval=cval)
+                      for x_channel in x]
     x = np.stack(channel_images, axis=0)
     x = np.rollaxis(x, 0, channel_index + 1)
     return x
-
-
-def flip_axis(x, axis):
-    raise NotImplementedError('flip_axis 3D is not yet implemented!')
-
-
-#     x = np.asarray(x).swapaxes(axis, 0)
-#     x = x[::-1, ...]
-#     x = x.swapaxes(0, axis)
-#     return x
 
 
 def array_to_img(x, dim_ordering=K.image_dim_ordering(), scale=False):
@@ -205,35 +196,40 @@ def img_to_array(img, dim_ordering=K.image_dim_ordering()):
 
 
 def np_to_itk(np_img):
-    '''
-    Converts a numpy array to a SimpleITK image
-    '''
+    """
+    Converts a numpy array to a SimpleITK image.
+
+    Args:
+        np_img:
+
+    Returns:
+
+    """
     return sitk.GetImageFromArray(np_img)
 
 
 def itk_to_np(itk_img):
-    '''
+    """
     Converts a SimpleITK image to numpy array
-    '''
+    Args:
+        itk_img:
+
+    Returns:
+
+    """
     return sitk.GetArrayFromImage(itk_img)
 
 
-def load_img(path, target_size=None):
-    '''
+def load_img(path, **kwargs):
+    """
     Load a (volume) from the path
     # Arguments
         path: the path of the image
-        target_size: the target size (px) of the volume
         
     # Returns
         The image as an instance of SimpleITK.SimpleITK.Image
-    '''
+    """
     img = sitk.ReadImage(path)
-
-    # TODO resize the image to the target size
-    if target_size is not None:
-        raise NotImplementedError('Using target_size is not yet implemented!')
-
     return img
 
 
@@ -683,7 +679,7 @@ class NumpyArrayIterator(Iterator):
                     sitk.WriteImage(img, os.path.join(self.save_to_dir, fname))
             batch_x_list[ipt_idx] = batch_x
 
-        if not self.y is None:
+        if self.y is not None:
             batch_y = self.y[index_array]
             # TODO this must return a list of inputs (for each)
             # e.g. return [batch_x1,batch_x2],batch_y
