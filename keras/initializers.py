@@ -22,14 +22,16 @@ class Initializer(object):
 
 
 class Zeros(Initializer):
-    """Initializer that generates tensors initialized to 0."""
+    """Initializer that generates tensors initialized to 0.
+    """
 
     def __call__(self, shape, dtype=None):
         return K.constant(0, shape=shape, dtype=dtype)
 
 
 class Ones(Initializer):
-    """Initializer that generates tensors initialized to 1."""
+    """Initializer that generates tensors initialized to 1.
+    """
 
     def __call__(self, shape, dtype=None):
         return K.constant(1, shape=shape, dtype=dtype)
@@ -111,7 +113,7 @@ class RandomUniform(Initializer):
 class TruncatedNormal(Initializer):
     """Initializer that generates a truncated normal distribution.
 
-    These values are similar to values from a `random_normal_initializer`
+    These values are similar to values from a `RandomNormal`
     except that values more than two standard deviations from the mean
     are discarded and re-drawn. This is the recommended initializer for
     neural network weights and filters.
@@ -146,6 +148,7 @@ class VarianceScaling(Initializer):
 
     With `distribution="normal"`, samples are drawn from a truncated normal
     distribution centered on zero, with `stddev = sqrt(scale / n)` where n is:
+
         - number of input units in the weight tensor, if mode = "fan_in"
         - number of output units, if mode = "fan_out"
         - average of the numbers of input and output units, if mode = "fan_avg"
@@ -363,6 +366,29 @@ def he_normal(seed=None):
         He et al., http://arxiv.org/abs/1502.01852
     """
     return VarianceScaling(scale=2.,
+                           mode='fan_in',
+                           distribution='normal',
+                           seed=seed)
+
+
+def lecun_normal(seed=None):
+    """LeCun normal initializer.
+
+    It draws samples from a truncated normal distribution centered on 0
+    with `stddev = sqrt(1 / fan_in)`
+    where `fan_in` is the number of input units in the weight tensor.
+
+    # Arguments
+        seed: A Python integer. Used to seed the random generator.
+
+    # Returns
+        An initializer.
+
+    # References
+        - [Self-Normalizing Neural Networks](https://arxiv.org/abs/1706.02515)
+        - [Efficient Backprop](http://yann.lecun.com/exdb/publis/pdf/lecun-98b.pdf)
+    """
+    return VarianceScaling(scale=1.,
                            mode='fan_in',
                            distribution='normal',
                            seed=seed)
