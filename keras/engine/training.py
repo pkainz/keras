@@ -909,14 +909,8 @@ class Model(Container):
         self.test_function = None
         self.predict_function = None
 
-        # Collected trainable weights and sort them deterministically.
+        # Collected trainable weights, sorted in topological order.
         trainable_weights = self.trainable_weights
-        # Sort weights by name.
-        if trainable_weights:
-            if K.backend() == 'theano':
-                trainable_weights.sort(key=lambda x: x.name if x.name else x.auto_name)
-            else:
-                trainable_weights.sort(key=lambda x: x.name)
         self._collected_trainable_weights = trainable_weights
 
     def _make_train_function(self):
@@ -1777,11 +1771,12 @@ class Model(Container):
             for cbk in callbacks:
                 cbk.validation_data = val_data
         is_sequence = isinstance(generator, Sequence)
-        if not is_sequence and use_multiprocessing:
+        if not is_sequence and use_multiprocessing and workers > 1:
             warnings.warn(
                 UserWarning('Using a generator with `use_multiprocessing=True`'
-                            ' may duplicate your data.Please consider using '
-                            'the `keras.utils.Sequence` class.'))
+                            ' and multiple workers may duplicate your data.'
+                            ' Please consider using the`keras.utils.Sequence'
+                            ' class.'))
         enqueuer = None
 
         try:
@@ -1927,11 +1922,12 @@ class Model(Container):
         all_outs = []
         batch_sizes = []
         is_sequence = isinstance(generator, Sequence)
-        if not is_sequence and use_multiprocessing:
+        if not is_sequence and use_multiprocessing and workers > 1:
             warnings.warn(
                 UserWarning('Using a generator with `use_multiprocessing=True`'
-                            ' may duplicate your data.Please consider using '
-                            'the `keras.utils.Sequence` class.'))
+                            ' and multiple workers may duplicate your data.'
+                            ' Please consider using the`keras.utils.Sequence'
+                            ' class.'))
         enqueuer = None
 
         try:
@@ -2035,11 +2031,12 @@ class Model(Container):
         wait_time = 0.01
         all_outs = []
         is_sequence = isinstance(generator, Sequence)
-        if not is_sequence and use_multiprocessing:
+        if not is_sequence and use_multiprocessing and workers > 1:
             warnings.warn(
                 UserWarning('Using a generator with `use_multiprocessing=True`'
-                            ' may duplicate your data.Please consider using '
-                            'the `keras.utils.Sequence` class.'))
+                            ' and multiple workers may duplicate your data.'
+                            ' Please consider using the`keras.utils.Sequence'
+                            ' class.'))
         enqueuer = None
 
         try:
