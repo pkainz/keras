@@ -1,4 +1,5 @@
 import tensorflow as tf
+from tensorflow.python.client import device_lib
 from tensorflow.python.training import moving_averages
 from tensorflow.python.ops import tensor_array_ops
 from tensorflow.python.ops import control_flow_ops
@@ -35,7 +36,7 @@ _GRAPH_LEARNING_PHASES = {}
 
 # This dictionary holds a mapping {graph: UID_DICT}.
 # each UID_DICT is a dictionary mapping name prefixes to a current index,
-# used for generatic graph-specific string UIDs
+# used for generic graph-specific string UIDs
 # for various names (e.g. layer names).
 _GRAPH_UID_DICTS = {}
 
@@ -43,6 +44,13 @@ _GRAPH_UID_DICTS = {}
 # up to the user.
 # Change its value via `manual_variable_initialization(value)`.
 _MANUAL_VAR_INIT = False
+
+# This map is for converting the keras data format string to that of TF.
+_DATA_FORMAT_MAP = {'channels_first': 'NCHW', 'channels_last': 'NHWC'}
+
+# This list queries the devices.
+# We assume our devices don't change during our lifetime.
+_LOCAL_DEVICES = device_lib.list_local_devices()
 
 
 def get_uid(prefix=''):
@@ -164,7 +172,22 @@ def get_session():
         session = _SESSION
     if not _MANUAL_VAR_INIT:
         with session.graph.as_default():
-            _initialize_variables()
+            variables = tf.global_variables()
+            candidate_vars = []
+            for v in variables:
+                if not getattr(v, '_keras_initialized', False):
+                    candidate_vars.append(v)
+            # This step is expensive, so we only run it on variables
+            # not already marked as initialized.
+            is_initialized = session.run(
+                [tf.is_variable_initialized(v) for v in candidate_vars])
+            uninitialized_vars = []
+            for flag, v in zip(is_initialized, candidate_vars):
+                if not flag:
+                    uninitialized_vars.append(v)
+                v._keras_initialized = True
+            if uninitialized_vars:
+                session.run(tf.variables_initializer(uninitialized_vars))
     return session
 
 
@@ -178,39 +201,76 @@ def set_session(session):
     _SESSION = session
 
 
-# VARIABLE MANIPULATION
+# DEVICE MANIPULATION AND PROBING
 
-def _convert_string_dtype(dtype):
-    """Get the type from a string.
+class _TfDeviceCaptureOp(object):
+    """Class for capturing the TF device scope."""
 
-    # Arguments
-        dtype: A string representation of a type.
+    def __init__(self):
+        self.device = None
+
+    def _set_device(self, device):
+        """This method captures TF's explicit device scope setting."""
+        self.device = device
+
+
+def _get_current_tf_device():
+    """Return explicit device of current context, otherwise returns `None`.
 
     # Returns
-        The type requested.
+        If the current device scope is explicitly set, it returns a string with
+        the device (`CPU` or `GPU`). If the scope is not explicitly set, it will
+        return `None`.
+    """
+    g = tf.get_default_graph()
+    op = _TfDeviceCaptureOp()
+    g._apply_device_functions(op)
+    return op.device
+
+
+def _is_current_explicit_device(device_type):
+    """Check if the current device is explicitly set on the device type specified.
+
+    # Arguments
+        device_type: A string containing `GPU` or `CPU` (case-insensitive).
+
+    # Returns
+        A boolean indicating if the current device scope is explicitly set on the device type.
 
     # Raises
-        ValueError: if `dtype` is not supported.
+        ValueError: If the `device_type` string indicates an unsupported device.
     """
-    if dtype == 'float16':
-        return tf.float16
-    if dtype == 'float32':
-        return tf.float32
-    elif dtype == 'float64':
-        return tf.float64
-    elif dtype == 'int16':
-        return tf.int16
-    elif dtype == 'int32':
-        return tf.int32
-    elif dtype == 'int64':
-        return tf.int64
-    elif dtype == 'uint8':
-        return tf.int8
-    elif dtype == 'uint16':
-        return tf.uint16
-    else:
-        raise ValueError('Unsupported dtype:', dtype)
+    device_type = device_type.upper()
+    if device_type not in ['CPU', 'GPU']:
+        raise ValueError('device_type should be either "CPU" or "GPU".')
+    device = _get_current_tf_device()
+    return (device is not None and device.device_type == device_type.upper())
 
+
+def _get_available_gpus():
+    """Get a list of available gpu devices (formatted as strings).
+
+    # Returns
+        A list of available GPU devices.
+    """
+    return [x.name for x in _LOCAL_DEVICES if x.device_type == 'GPU']
+
+
+def _has_nchw_support():
+    """Check whether the current scope supports NCHW ops.
+
+    Tensorflow does not support NCHW on CPU. Therefore we check if we are not explicitly put on
+    CPU, and have GPUs available. In this case there will be soft-placing on the GPU device.
+
+    # Returns
+        bool: if the current scope device placement would support nchw
+    """
+    explicitly_on_cpu = _is_current_explicit_device('CPU')
+    gpus_available = len(_get_available_gpus()) > 0
+    return (not explicitly_on_cpu and gpus_available)
+
+
+# VARIABLE MANIPULATION
 
 def _to_tensor(x, dtype):
     """Convert the input `x` to a tensor of type `dtype`.
@@ -280,13 +340,15 @@ def to_dense(tensor):
 name_scope = tf.name_scope
 
 
-def variable(value, dtype=None, name=None):
+def variable(value, dtype=None, name=None, constraint=None):
     """Instantiates a variable and returns it.
 
     # Arguments
         value: Numpy array, initial value of the tensor.
         dtype: Tensor type.
         name: Optional name string for the tensor.
+        constraint: Optional projection function to be
+            applied to the variable after an optimizer update.
 
     # Returns
         A variable instance (with Keras metadata included).
@@ -317,27 +379,18 @@ def variable(value, dtype=None, name=None):
         v._keras_shape = sparse_coo.shape
         v._uses_learning_phase = False
         return v
-    v = tf.Variable(value, dtype=_convert_string_dtype(dtype), name=name)
+    v = tf.Variable(value, dtype=tf.as_dtype(dtype), name=name)
     if isinstance(value, np.ndarray):
         v._keras_shape = value.shape
     elif hasattr(value, 'get_shape'):
         v._keras_shape = int_shape(value)
     v._uses_learning_phase = False
+    # TODO: move to Variable constructor when supported in public release.
+    try:
+        v.constraint = constraint
+    except AttributeError:
+        v._constraint = constraint
     return v
-
-
-def _initialize_variables():
-    """Utility to initialize uninitialized variables on the fly.
-    """
-    variables = tf.global_variables()
-    uninitialized_variables = []
-    for v in variables:
-        if not hasattr(v, '_keras_initialized') or not v._keras_initialized:
-            uninitialized_variables.append(v)
-            v._keras_initialized = True
-    if uninitialized_variables:
-        sess = get_session()
-        sess.run(tf.variables_initializer(uninitialized_variables))
 
 
 def constant(value, dtype=None, shape=None, name=None):
@@ -360,18 +413,22 @@ def constant(value, dtype=None, shape=None, name=None):
 def is_keras_tensor(x):
     """Returns whether `x` is a Keras tensor.
 
+    A "Keras tensor" is a tensor that was returned by a Keras layer,
+    (`Layer` class) or by `Input`.
+
     # Arguments
-        x: a potential tensor.
+        x: A candidate tensor.
 
     # Returns
-        A boolean: whether the argument is a Keras tensor.
+        A boolean: Whether the argument is a Keras tensor.
 
     # Raises
-        ValueError: in case `x` is not a symbolic tensor.
+        ValueError: In case `x` is not a symbolic tensor.
 
     # Examples
     ```python
         >>> from keras import backend as K
+        >>> from keras.layers import Input, Dense
         >>> np_var = numpy.array([1, 2])
         >>> K.is_keras_tensor(np_var) # A numpy array is not a symbolic tensor.
         ValueError
@@ -379,10 +436,16 @@ def is_keras_tensor(x):
         >>> K.is_keras_tensor(k_var) # A variable indirectly created outside of keras is not a Keras tensor.
         False
         >>> keras_var = K.variable(np_var)
-        >>> K.is_keras_tensor(keras_var)  # A variable created with the keras backend is a Keras tensor.
-        True
+        >>> K.is_keras_tensor(keras_var)  # A variable created with the keras backend is not a Keras tensor.
+        False
         >>> keras_placeholder = K.placeholder(shape=(2, 4, 5))
-        >>> K.is_keras_tensor(keras_placeholder)  # A placeholder is a Keras tensor.
+        >>> K.is_keras_tensor(keras_placeholder)  # A placeholder is not a Keras tensor.
+        False
+        >>> keras_input = Input([10])
+        >>> K.is_keras_tensor(keras_input) # An Input is a Keras tensor.
+        True
+        >>> keras_layer_output = Dense(10)(keras_input)
+        >>> K.is_keras_tensor(keras_layer_output) # Any Keras layer output is a Keras tensor.
         True
     ```
     """
@@ -434,6 +497,21 @@ def placeholder(shape=None, ndim=None, dtype=None, sparse=False, name=None):
     return x
 
 
+def is_placeholder(x):
+    """Returns whether `x` is a placeholder.
+
+    # Arguments
+        x: A candidate placeholder.
+
+    # Returns
+        Boolean.
+    """
+    try:
+        return x.op.type == 'Placeholder'
+    except AttributeError:
+        return False
+
+
 def shape(x):
     """Returns the symbolic shape of a tensor or variable.
 
@@ -444,7 +522,7 @@ def shape(x):
         A symbolic shape (which is itself a tensor).
 
     # Examples
-    ```
+    ```python
         # TensorFlow example
         >>> from keras import backend as K
         >>> tf_session = K.get_session()
@@ -595,7 +673,7 @@ def zeros(shape, dtype=None, name=None):
     """
     if dtype is None:
         dtype = floatx()
-    tf_dtype = _convert_string_dtype(dtype)
+    tf_dtype = tf.as_dtype(dtype)
     return variable(tf.constant_initializer(0., dtype=tf_dtype)(shape),
                     dtype, name)
 
@@ -623,7 +701,7 @@ def ones(shape, dtype=None, name=None):
     """
     if dtype is None:
         dtype = floatx()
-    tf_dtype = _convert_string_dtype(dtype)
+    tf_dtype = tf.as_dtype(dtype)
     return variable(tf.constant_initializer(1., dtype=tf_dtype)(shape),
                     dtype, name)
 
@@ -743,7 +821,7 @@ def random_uniform_variable(shape, low, high, dtype=None,
     """
     if dtype is None:
         dtype = floatx()
-    tf_dtype = _convert_string_dtype(dtype)
+    tf_dtype = tf.as_dtype(dtype)
     if seed is None:
         # ensure that randomness is conditioned by the Numpy RNG
         seed = np.random.randint(10e8)
@@ -780,7 +858,7 @@ def random_normal_variable(shape, mean, scale, dtype=None,
     """
     if dtype is None:
         dtype = floatx()
-    tf_dtype = _convert_string_dtype(dtype)
+    tf_dtype = tf.as_dtype(dtype)
     if seed is None:
         # ensure that randomness is conditioned by the Numpy RNG
         seed = np.random.randint(10e8)
@@ -1800,7 +1878,7 @@ def repeat_elements(x, rep, axis):
         x_rep = [s for s in splits for _ in range(rep)]
         return concatenate(x_rep, axis)
 
-    # Here we use tf.tile to mimic behaviour of np.repeat so that
+    # Here we use tf.tile to mimic behavior of np.repeat so that
     # we can handle dynamic shapes (that include None).
     # To do that, we need an auxiliary axis to repeat elements along
     # it and then merge them along the desired axis.
@@ -2127,8 +2205,8 @@ def set_value(x, value):
         value: Value to set the tensor to, as a Numpy array
             (of the same shape).
     """
-    value = np.asarray(value)
-    tf_dtype = _convert_string_dtype(x.dtype.name.split('_')[0])
+    value = np.asarray(value, dtype=dtype(x))
+    tf_dtype = tf.as_dtype(x.dtype.name.split('_')[0])
     if hasattr(x, '_assign_placeholder'):
         assign_placeholder = x._assign_placeholder
         assign_op = x._assign_op
@@ -2151,8 +2229,8 @@ def batch_set_value(tuples):
         assign_ops = []
         feed_dict = {}
         for x, value in tuples:
-            value = np.asarray(value)
-            tf_dtype = _convert_string_dtype(x.dtype.name.split('_')[0])
+            value = np.asarray(value, dtype=dtype(x))
+            tf_dtype = tf.as_dtype(x.dtype.name.split('_')[0])
             if hasattr(x, '_assign_placeholder'):
                 assign_placeholder = x._assign_placeholder
                 assign_op = x._assign_op
@@ -2181,6 +2259,15 @@ def get_variable_shape(x):
 
 def print_tensor(x, message=''):
     """Prints `message` and the tensor value when evaluated.
+
+     Note that `print_tensor` returns a new tensor identical to `x`
+     which should be used in the following code. Otherwise the
+     print operation is not taken into account during evaluation.
+
+     # Example
+     ```python
+         >>> x = K.print_tensor(x, message="x is: ")
+     ```
 
     # Arguments
         x: Tensor to print.
@@ -2368,6 +2455,9 @@ def rnn(step_function, inputs, initial_states,
     if constants is None:
         constants = []
 
+    global uses_learning_phase
+    uses_learning_phase = False
+
     if unroll:
         if not inputs.get_shape()[0]:
             raise ValueError('Unrolling requires a '
@@ -2387,6 +2477,8 @@ def rnn(step_function, inputs, initial_states,
 
             for inp, mask_t in zip(input_list, mask_list):
                 output, new_states = step_function(inp, states + constants)
+                if getattr(output, '_uses_learning_phase', False):
+                    uses_learning_phase = True
 
                 # tf.where needs its condition tensor
                 # to be the same shape as its two
@@ -2425,6 +2517,8 @@ def rnn(step_function, inputs, initial_states,
         else:
             for inp in input_list:
                 output, states = step_function(inp, states + constants)
+                if getattr(output, '_uses_learning_phase', False):
+                    uses_learning_phase = True
                 successive_outputs.append(output)
                 successive_states.append(states)
             last_output = successive_outputs[-1]
@@ -2483,6 +2577,9 @@ def rnn(step_function, inputs, initial_states,
                 output, new_states = step_function(current_input,
                                                    tuple(states) +
                                                    tuple(constants))
+                if getattr(output, '_uses_learning_phase', False):
+                    global uses_learning_phase
+                    uses_learning_phase = True
                 for state, new_state in zip(states, new_states):
                     new_state.set_shape(state.get_shape())
                 tiled_mask_t = tf.tile(mask_t,
@@ -2507,6 +2604,9 @@ def rnn(step_function, inputs, initial_states,
                 output, new_states = step_function(current_input,
                                                    tuple(states) +
                                                    tuple(constants))
+                if getattr(output, '_uses_learning_phase', False):
+                    global uses_learning_phase
+                    uses_learning_phase = True
                 for state, new_state in zip(states, new_states):
                     new_state.set_shape(state.get_shape())
                 output_ta_t = output_ta_t.write(time, output)
@@ -2527,6 +2627,7 @@ def rnn(step_function, inputs, initial_states,
 
     axes = [1, 0] + list(range(2, len(outputs.get_shape())))
     outputs = tf.transpose(outputs, axes)
+    last_output._uses_learning_phase = uses_learning_phase
     return last_output, outputs, new_states
 
 
@@ -2537,28 +2638,57 @@ def switch(condition, then_expression, else_expression):
     should be symbolic tensors of the *same shape*.
 
     # Arguments
-        condition: scalar tensor (`int` or `bool`).
+        condition: tensor (`int` or `bool`).
         then_expression: either a tensor, or a callable that returns a tensor.
         else_expression: either a tensor, or a callable that returns a tensor.
 
     # Returns
         The selected tensor.
+
+    # Raises
+        ValueError: If rank of `condition` is greater than rank of expressions.
     """
     if condition.dtype != tf.bool:
         condition = tf.cast(condition, 'bool')
-    if not callable(then_expression):
-        def then_expression_fn():
-            return then_expression
+    cond_ndim = ndim(condition)
+    if not cond_ndim:
+        if not callable(then_expression):
+            def then_expression_fn():
+                return then_expression
+        else:
+            then_expression_fn = then_expression
+        if not callable(else_expression):
+            def else_expression_fn():
+                return else_expression
+        else:
+            else_expression_fn = else_expression
+        x = tf.cond(condition,
+                    then_expression_fn,
+                    else_expression_fn)
     else:
-        then_expression_fn = then_expression
-    if not callable(else_expression):
-        def else_expression_fn():
-            return else_expression
-    else:
-        else_expression_fn = else_expression
-    x = tf.cond(condition,
-                then_expression_fn,
-                else_expression_fn)
+        # tf.where needs its condition tensor
+        # to be the same shape as its two
+        # result tensors
+        if callable(then_expression):
+            then_expression = then_expression()
+        if callable(else_expression):
+            else_expression = else_expression()
+        expr_ndim = ndim(then_expression)
+        if cond_ndim > expr_ndim:
+            raise ValueError('Rank of `condition` should be less than or'
+                             ' equal to rank of `then_expression` and '
+                             '`else_expression`. ndim(condition)=' +
+                             str(cond_ndim) + ', ndim(then_expression)'
+                             '=' + str(expr_ndim))
+        if cond_ndim > 1:
+            ndim_diff = expr_ndim - cond_ndim
+            cond_shape = tf.concat([tf.shape(condition), [1] * ndim_diff], axis=0)
+            condition = tf.reshape(condition, cond_shape)
+            expr_shape = tf.shape(then_expression)
+            shape_diff = expr_shape - cond_shape
+            tile_shape = tf.where(shape_diff > 0, expr_shape, tf.ones_like(expr_shape))
+            condition = tf.tile(condition, tile_shape)
+        x = tf.where(condition, then_expression, else_expression)
     return x
 
 
@@ -2574,7 +2704,7 @@ def in_train_phase(x, alt, training=None):
             (tensor or callable that returns a tensor).
         training: Optional scalar tensor
             (or Python boolean, or Python integer)
-            specifing the learning phase.
+            specifying the learning phase.
 
     # Returns
         Either `x` or `alt` based on the `training` flag.
@@ -2617,7 +2747,7 @@ def in_test_phase(x, alt, training=None):
             (tensor or callable that returns a tensor).
         training: Optional scalar tensor
             (or Python boolean, or Python integer)
-            specifing the learning phase.
+            specifying the learning phase.
 
     # Returns
         Either `x` or `alt` based on `K.learning_phase`.
@@ -2657,7 +2787,7 @@ def elu(x, alpha=1.):
     """Exponential linear unit.
 
     # Arguments
-        x: A tenor or variable to compute the activation function for.
+        x: A tensor or variable to compute the activation function for.
         alpha: A scalar, slope of positive section.
 
     # Returns
@@ -3121,13 +3251,17 @@ def conv2d(x, kernel, strides=(1, 1), padding='valid',
     """
     if data_format is None:
         data_format = image_data_format()
-    if data_format not in {'channels_first', 'channels_last'}:
+    if data_format not in _DATA_FORMAT_MAP:
         raise ValueError('Unknown data_format ' + str(data_format))
 
-    # With 4d inputs, tf.nn.convolution only supports
-    # data_format NHWC, so we transpose the inputs
-    # in case we are in data_format channels_first.
-    x = _preprocess_conv2d_input(x, data_format)
+    tf_data_format = _DATA_FORMAT_MAP[data_format]
+
+    nhwc_roundtrip = not _has_nchw_support() and tf_data_format == 'NCHW'
+
+    if nhwc_roundtrip:
+        tf_data_format = 'NHWC'
+        x = tf.transpose(x, (0, 2, 3, 1))  # NCHW -> NHWC
+
     padding = _preprocess_padding(padding)
     x = tf.nn.convolution(
         input=x,
@@ -3135,8 +3269,12 @@ def conv2d(x, kernel, strides=(1, 1), padding='valid',
         dilation_rate=dilation_rate,
         strides=strides,
         padding=padding,
-        data_format='NHWC')
-    return _postprocess_conv2d_output(x, data_format)
+        data_format=tf_data_format)
+
+    if nhwc_roundtrip:
+        x = tf.transpose(x, (0, 3, 1, 2))  # NCHW -> NHWC
+
+    return x
 
 
 def conv2d_transpose(x, kernel, output_shape, strides=(1, 1),
@@ -3565,10 +3703,10 @@ def truncated_normal(shape, mean=0.0, stddev=1.0, dtype=None, seed=None):
 
 
 # CTC
-# tensorflow has a native implemenation, but it uses sparse tensors
+# TensorFlow has a native implementation, but it uses sparse tensors
 # and therefore requires a wrapper for Keras. The functions below convert
 # dense to sparse tensors and also wraps up the beam search code that is
-# in tensorflow's CTC implementation
+# in TensorFlow's CTC implementation
 
 
 def ctc_label_dense_to_sparse(labels, label_lengths):
@@ -3579,7 +3717,7 @@ def ctc_label_dense_to_sparse(labels, label_lengths):
         label_lengths: length of the labels.
 
     # Returns
-        A sparse tensor representation of the lablels.
+        A sparse tensor representation of the labels.
     """
     label_shape = tf.shape(labels)
     num_batches_tns = tf.stack([label_shape[0]])
@@ -3594,11 +3732,11 @@ def ctc_label_dense_to_sparse(labels, label_lengths):
                                      initializer=init, parallel_iterations=1)
     dense_mask = dense_mask[:, 0, :]
 
-    label_array = tf.reshape(tf.tile(tf.range(0, label_shape[1]), num_batches_tns),
+    label_array = tf.reshape(tf.tile(tf.range(label_shape[1]), num_batches_tns),
                              label_shape)
     label_ind = tf.boolean_mask(label_array, dense_mask)
 
-    batch_array = tf.transpose(tf.reshape(tf.tile(tf.range(0, label_shape[0]),
+    batch_array = tf.transpose(tf.reshape(tf.tile(tf.range(label_shape[0]),
                                                   max_num_labels_tns), reverse(label_shape, 0)))
     batch_ind = tf.boolean_mask(batch_array, dense_mask)
     indices = tf.transpose(tf.reshape(concatenate([batch_ind, label_ind], axis=0), [2, -1]))
@@ -3746,7 +3884,7 @@ def local_conv1d(inputs, kernel, kernel_size, strides, data_format=None):
         data_format: the data format, channels_first or channels_last
 
     # Returns
-        the tensor after 1d conv with un-shared weights, with shape (batch_size, output_lenght, filters)
+        the tensor after 1d conv with un-shared weights, with shape (batch_size, output_length, filters)
 
     # Raises
         ValueError: if `data_format` is neither `channels_last` or `channels_first`.
