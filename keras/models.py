@@ -18,6 +18,7 @@ from .engine.training import Model
 from .engine import topology
 from .engine.topology import Layer
 from .engine.topology import Input
+from .engine.topology import InputLayer
 from .legacy import layers as legacy_layers
 from .legacy import models as legacy_models
 from .legacy import interfaces
@@ -425,37 +426,50 @@ class Sequential(Model):
                             'an instance of class Layer. '
                             'Found: ' + str(layer))
         if not self.outputs:
-            # first layer in model: check that it is an input layer
-            if not layer.inbound_nodes:
-                # create an input layer
-                if not hasattr(layer, 'batch_input_shape'):
-                    raise ValueError('The first layer in a '
-                                     'Sequential model must '
-                                     'get an `input_shape` or '
-                                     '`batch_input_shape` argument.')
+            # First layer in model: check that it is an input layer.
+            if not isinstance(layer, (InputLayer, legacy_layers.Merge)):
+                # Create an input layer.
+                # First, we need to infer its expected input shape and dtype.
+                if isinstance(layer, (Model, Sequential)):
+                    # We were passed a model as first layer.
+                    # This requires a specific way to figure out the
+                    # input shape and dtype.
+                    if not layer.layers:
+                        raise ValueError('Cannot add an empty model '
+                                         'to a `Sequential` model.')
+                    # In case of nested models: recover the first layer
+                    # of the deepest model to infer input shape and dtype.
+                    first_layer = layer.layers[0]
+                    while isinstance(first_layer, (Model, Sequential)):
+                        first_layer = first_layer.layers[0]
+                    batch_shape = first_layer.batch_input_shape
+                    dtype = first_layer.dtype
+                else:
+                    # We were passed a regular layer, and it should
+                    # know about its input shape. Otherwise, that's an error.
+                    if not hasattr(layer, 'batch_input_shape'):
+                        raise ValueError('The first layer in a '
+                                         'Sequential model must '
+                                         'get an `input_shape` or '
+                                         '`batch_input_shape` argument.')
+                    batch_shape = layer.batch_input_shape
+                    dtype = layer.dtype
                 # Instantiate the input layer.
-                x = Input(batch_shape=layer.batch_input_shape,
-                          dtype=layer.dtype, name=layer.name + '_input')
+                x = Input(batch_shape=batch_shape,
+                          dtype=dtype,
+                          name=layer.name + '_input')
                 # This will build the current layer
                 # and create the node connecting the current layer
                 # to the input layer we just created.
                 layer(x)
 
-            if len(layer.inbound_nodes) != 1:
-                raise ValueError('A layer added to a Sequential model must '
-                                 'not already be connected somewhere else. '
-                                 'Model received layer ' + layer.name +
-                                 ' which has ' +
-                                 str(len(layer.inbound_nodes)) +
-                                 ' pre-existing inbound connections.')
-
-            if len(layer.inbound_nodes[0].output_tensors) != 1:
+            if len(layer.inbound_nodes[-1].output_tensors) != 1:
                 raise ValueError('All layers in a Sequential model '
                                  'should have a single output tensor. '
                                  'For multi-output layers, '
                                  'use the functional API.')
 
-            self.outputs = [layer.inbound_nodes[0].output_tensors[0]]
+            self.outputs = [layer.inbound_nodes[-1].output_tensors[0]]
             self.inputs = topology.get_source_inputs(self.outputs[0])
 
             # We create an input node, which we will keep updated
@@ -743,26 +757,47 @@ class Sequential(Model):
                 metrics=None,
                 sample_weight_mode=None,
                 weighted_metrics=None,
+                target_tensors=None,
                 **kwargs):
-        """Configures the learning process.
+        """Configures the model for training.
 
         # Arguments
-            optimizer: str (name of optimizer) or optimizer object.
+            optimizer: String (name of optimizer) or optimizer object.
                 See [optimizers](/optimizers).
-            loss: str (name of objective function) or objective function.
+            loss: String (name of objective function) or objective function.
                 See [losses](/losses).
-            metrics: list of metrics to be evaluated by the model
+                If the model has multiple outputs, you can use a different loss
+                on each output by passing a dictionary or a list of losses.
+                The loss value that will be minimized by the model
+                will then be the sum of all individual losses.
+            metrics: List of metrics to be evaluated by the model
                 during training and testing.
                 Typically you will use `metrics=['accuracy']`.
-                See [metrics](/metrics).
-            sample_weight_mode: if you need to do timestep-wise
-                sample weighting (2D weights), set this to "temporal".
-                "None" defaults to sample-wise weights (1D).
-            weighted_metrics: list of metrics to be evaluated and weighted
-                by sample_weight or class_weight during training and testing
-            **kwargs: for Theano/CNTK backends, these are passed into
-                K.function. When using the TensorFlow backend, these are
-                passed into `tf.Session.run`.
+                To specify different metrics for different outputs of a
+                multi-output model, you could also pass a dictionary,
+                such as `metrics={'output_a': 'accuracy'}`.
+            sample_weight_mode: If you need to do timestep-wise
+                sample weighting (2D weights), set this to `"temporal"`.
+                `None` defaults to sample-wise weights (1D).
+                If the model has multiple outputs, you can use a different
+                `sample_weight_mode` on each output by passing a
+                dictionary or a list of modes.
+            weighted_metrics: List of metrics to be evaluated and weighted
+                by sample_weight or class_weight during training and testing.
+            target_tensors: By default, Keras will create placeholders for the
+                model's target, which will be fed with the target data during
+                training. If instead you would like to use your own
+                target tensors (in turn, Keras will not expect external
+                Numpy data for these targets at training time), you
+                can specify them via the `target_tensors` argument. It can be
+                a single tensor (for a single-output model), a list of tensors,
+                or a dict mapping output names to target tensors.
+            **kwargs: When using the Theano/CNTK backends, these arguments
+                are passed into K.function. When using the TensorFlow backend,
+                these arguments are passed into `tf.Session.run`.
+
+        # Raises
+            ValueError: In case of invalid arguments for
 
         # Example
             ```python
@@ -781,22 +816,36 @@ class Sequential(Model):
                            metrics=metrics,
                            sample_weight_mode=sample_weight_mode,
                            weighted_metrics=weighted_metrics,
+                           target_tensors=target_tensors,
                            **kwargs)
         self.optimizer = self.model.optimizer
         self.loss = self.model.loss
-        self.total_loss = self.model.total_loss
-        self.loss_weights = self.model.loss_weights
         self.metrics = self.model.metrics
+        self.loss_weights = self.model.loss_weights
+        self.sample_weight_mode = self.model.sample_weight_mode
         self.weighted_metrics = self.model.weighted_metrics
+        self.targets = self.model.targets
         self.metrics_tensors = self.model.metrics_tensors
         self.metrics_names = self.model.metrics_names
-        self.sample_weight_mode = self.model.sample_weight_mode
         self.sample_weights = self.model.sample_weights
-        self.targets = self.model.targets
+        self.total_loss = self.model.total_loss
 
-    def fit(self, x, y, batch_size=32, epochs=10, verbose=1, callbacks=None,
-            validation_split=0., validation_data=None, shuffle=True,
-            class_weight=None, sample_weight=None, initial_epoch=0, **kwargs):
+    def fit(self,
+            x=None,
+            y=None,
+            batch_size=None,
+            epochs=1,
+            verbose=1,
+            callbacks=None,
+            validation_split=0.,
+            validation_data=None,
+            shuffle=True,
+            class_weight=None,
+            sample_weight=None,
+            initial_epoch=0,
+            steps_per_epoch=None,
+            validation_steps=None,
+            **kwargs):
         """Trains the model for a fixed number of epochs.
 
         # Arguments
@@ -868,7 +917,9 @@ class Sequential(Model):
                               shuffle=shuffle,
                               class_weight=class_weight,
                               sample_weight=sample_weight,
-                              initial_epoch=initial_epoch)
+                              initial_epoch=initial_epoch,
+                              steps_per_epoch=steps_per_epoch,
+                              validation_steps=validation_steps)
 
     def evaluate(self, x, y, batch_size=32, verbose=1,
                  sample_weight=None):
@@ -1087,9 +1138,9 @@ class Sequential(Model):
                 non picklable arguments to the generator
                 as they can't be passed
                 easily to children processes.
-            shuffle: Whether to shuffle the data at the beginning of each
-                epoch. Only used with instances of `Sequence` (
-                keras.utils.Sequence).
+            shuffle: Whether to shuffle the order of the batches at
+                the beginning of each epoch. Only used with instances
+                of `Sequence` (keras.utils.Sequence).
             initial_epoch: Epoch at which to start training
                 (useful for resuming a previous training run).
 
